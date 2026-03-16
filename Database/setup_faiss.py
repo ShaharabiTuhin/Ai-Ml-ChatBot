@@ -1,35 +1,44 @@
-import os
+from pathlib import Path
 from langchain_community.document_loaders import TextLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_community.vectorstores import FAISS
 from dotenv import load_dotenv
 
 load_dotenv()
 
-# We'll create a dummy text file to act as the knowledge base for our RAG tool
-DUMMY_TEXT_FILE = "Database/dummy_knowledge.txt"
+DB_DIR = Path("Database")
+DEFAULT_KNOWLEDGE_FILE = DB_DIR / "dummy_knowledge.txt"
 
-def create_dummy_knowledge_base():
-    with open(DUMMY_TEXT_FILE, "w") as f:
-        f.write("""
-        Project AI Chatbot Details:
-        Deadline: March 13th at 11:59PM.
-        Requirements: Front-end (UI/UX), Back-end (FastAPI, Python), Database (FAISS).
-        Tools Needed: Internet Search, OCR, and RAG.
-        Tracing: Must implement LangSmith tracing.
-        Developer Name: Tuhin.
-        """)
-    return DUMMY_TEXT_FILE
+
+def ensure_default_knowledge_file() -> None:
+    if DEFAULT_KNOWLEDGE_FILE.exists():
+        return
+    DEFAULT_KNOWLEDGE_FILE.write_text(
+        """
+Project AI Chatbot Details:
+Deadline: March 13th at 11:59PM.
+Requirements: Front-end (UI/UX), Back-end (FastAPI, Python), Database (FAISS).
+Tools Needed: Internet Search, OCR, and RAG.
+Tracing: Must implement LangSmith tracing.
+Developer Name: Tuhin.
+        """.strip(),
+        encoding="utf-8",
+    )
+
+
+def load_knowledge_documents():
+    ensure_default_knowledge_file()
+    docs = []
+    for txt_path in sorted(DB_DIR.glob("*.txt")):
+        loader = TextLoader(str(txt_path), encoding="utf-8")
+        docs.extend(loader.load())
+    return docs
 
 def setup_faiss():
-    """Reads a text file, embeds it into a FAISS index and saves to disk."""
-    print("Creating dummy knowledge base text file...")
-    file_path = create_dummy_knowledge_base()
-
-    print(f"Loading documents from {file_path}...")
-    loader = TextLoader(file_path)
-    docs = loader.load()
+    """Reads knowledge text files, embeds them into a FAISS index and saves to disk."""
+    print("Loading knowledge documents from Database/*.txt...")
+    docs = load_knowledge_documents()
+    print(f"Loaded {len(docs)} document(s).")
 
     print("Splitting text into chunks...")
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)

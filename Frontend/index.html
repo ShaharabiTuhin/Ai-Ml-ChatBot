@@ -130,7 +130,7 @@
                     <ul class="flex flex-col pb-2">
                         <!-- Customized for your project features -->
                         <li>
-                            <button
+                            <button type="button" onclick="applyToolSelection('web-search')"
                                 class="w-full flex items-center justify-between px-4 py-3 hover:bg-[#333537] transition-colors text-sm text-[#e3e3e3] text-left">
                                 <span class="flex items-center gap-3"><i class="ph ph-globe text-lg"></i> Web Search
                                     Agent</span>
@@ -139,14 +139,14 @@
                             </button>
                         </li>
                         <li>
-                            <button
+                            <button type="button" onclick="applyToolSelection('ocr')"
                                 class="w-full flex items-center justify-between px-4 py-3 hover:bg-[#333537] transition-colors text-sm text-[#e3e3e3] text-left">
                                 <span class="flex items-center gap-3"><i class="ph ph-scan text-lg"></i> OCR
                                     Scanner</span>
                             </button>
                         </li>
                         <li>
-                            <button
+                            <button type="button" onclick="applyToolSelection('rag')"
                                 class="w-full flex items-center justify-between px-4 py-3 hover:bg-[#333537] transition-colors text-sm text-[#e3e3e3] text-left">
                                 <span class="flex items-center gap-3"><i
                                         class="ph ph-magnifying-glass-plus text-lg"></i> RAG Retrieval</span>
@@ -155,7 +155,7 @@
                             </button>
                         </li>
                         <li>
-                            <button
+                            <button type="button" onclick="applyToolSelection('langsmith')"
                                 class="w-full flex items-center justify-between px-4 py-3 hover:bg-[#333537] transition-colors text-sm text-[#e3e3e3] text-left">
                                 <span class="flex items-center gap-3"><i class="ph ph-monitor-play text-lg"></i>
                                     LangSmith Monitor</span>
@@ -192,40 +192,49 @@
                         class="flex items-center gap-2 w-full sm:w-auto px-2 mt-2 sm:mt-0 justify-between sm:justify-end relative">
                         <button onclick="togglePro()" id="pro-btn"
                             class="flex items-center gap-1 px-3 py-1.5 hover:bg-[#333537] rounded-full transition-colors text-[#c4c7c5] text-sm">
-                            Pro <i class="ph ph-caret-down text-xs"></i>
+                            <span id="pro-mode-label">Pro</span> <i class="ph ph-caret-down text-xs"></i>
                         </button>
                         <!-- Pro Dropdown Popover -->
                         <div id="pro-dropdown"
                             class="absolute bottom-[110%] right-8 sm:right-16 mb-2 w-56 bg-[#282a2c] rounded-2xl shadow-xl border border-[#333537] overflow-hidden hidden z-50 transform transition-all">
                             <ul class="flex flex-col py-2">
                                 <li>
-                                    <button
-                                        class="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-[#333537] transition-colors text-sm text-[#e3e3e3] text-left">
-                                        <i class="ph ph-lightning text-lg"></i>
-                                        Fast Response
+                                    <button type="button" onclick="applyProSelection('fast')"
+                                        id="pro-option-fast"
+                                        class="w-full flex items-center justify-between px-4 py-2.5 hover:bg-[#333537] transition-colors text-sm text-[#e3e3e3] text-left">
+                                        <div class="flex items-center gap-3">
+                                            <i class="ph ph-lightning text-lg"></i>
+                                            Fast Response
+                                        </div>
+                                        <i id="pro-check-fast" class="ph ph-check text-blue-400 hidden"></i>
                                     </button>
                                 </li>
                                 <li>
-                                    <button
-                                        class="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-[#333537] transition-colors text-sm text-[#e3e3e3] text-left">
-                                        <i class="ph ph-brain text-lg"></i>
-                                        Think
+                                    <button type="button" onclick="applyProSelection('think')"
+                                        id="pro-option-think"
+                                        class="w-full flex items-center justify-between px-4 py-2.5 hover:bg-[#333537] transition-colors text-sm text-[#e3e3e3] text-left">
+                                        <div class="flex items-center gap-3">
+                                            <i class="ph ph-brain text-lg"></i>
+                                            Think
+                                        </div>
+                                        <i id="pro-check-think" class="ph ph-check text-blue-400 hidden"></i>
                                     </button>
                                 </li>
                                 <li>
-                                    <button
-                                        class="w-full flex items-center justify-between px-4 py-2.5 bg-[#333537]/50 hover:bg-[#333537] transition-colors text-sm text-[#e3e3e3] text-left">
+                                    <button type="button" onclick="applyProSelection('pro')"
+                                        id="pro-option-pro"
+                                        class="w-full flex items-center justify-between px-4 py-2.5 hover:bg-[#333537] transition-colors text-sm text-[#e3e3e3] text-left">
                                         <div class="flex items-center gap-3">
                                             <i class="ph-fill ph-sparkle text-lg text-blue-400"></i>
                                             Pro
                                         </div>
-                                        <i class="ph ph-check text-blue-400"></i>
+                                        <i id="pro-check-pro" class="ph ph-check text-blue-400 hidden"></i>
                                     </button>
                                 </li>
                             </ul>
                         </div>
                         <div class="flex gap-1">
-                            <button class="p-2.5 hover:bg-[#333537] rounded-full transition-colors text-[#c4c7c5]">
+                            <button id="mic-btn" type="button" onclick="toggleVoiceInput()" class="p-2.5 hover:bg-[#333537] rounded-full transition-colors text-[#c4c7c5]" title="Voice input">
                                 <i class="ph ph-microphone text-xl"></i>
                             </button>
                             <!-- Send Button (Appears when typing usually, keeping it visible for UX) -->
@@ -238,19 +247,19 @@
 
                 <!-- Suggestion Pills -->
                 <div class="flex flex-wrap justify-center sm:justify-start gap-2 mt-4 sm:mt-6 px-2">
-                    <button
+                    <button type="button" onclick="applyToolSelection('web-search')"
                         class="bg-[#1e1f20] hover:bg-[#333537] border border-[#333537] text-[#c4c7c5] text-sm px-4 py-2 rounded-full transition-colors flex items-center gap-2">
                         <i class="ph ph-magnifying-glass text-[#4285f4]"></i> Internet Search
                     </button>
-                    <button
+                    <button type="button" onclick="applyToolSelection('ocr')"
                         class="bg-[#1e1f20] hover:bg-[#333537] border border-[#333537] text-[#c4c7c5] text-sm px-4 py-2 rounded-full transition-colors flex items-center gap-2">
                         <i class="ph ph-scan text-[#d96570]"></i> Extract Text (OCR)
                     </button>
-                    <button
+                    <button type="button" onclick="applyToolSelection('rag')"
                         class="bg-[#1e1f20] hover:bg-[#333537] border border-[#333537] text-[#c4c7c5] text-sm px-4 py-2 rounded-full transition-colors flex items-center gap-2">
                         <i class="ph ph-database text-[#f4b400]"></i> Query Vector DB
                     </button>
-                    <button
+                    <button type="button" onclick="applyToolSelection('langsmith')"
                         class="bg-[#1e1f20] hover:bg-[#333537] border border-[#333537] text-[#c4c7c5] text-sm px-4 py-2 rounded-full transition-colors hidden sm:flex items-center gap-2">
                         Review LangSmith
                     </button>
@@ -276,9 +285,104 @@
         const toolsBtn = document.getElementById('tools-btn');
         const proDropdown = document.getElementById('pro-dropdown');
         const proBtn = document.getElementById('pro-btn');
+        const proModeLabel = document.getElementById('pro-mode-label');
+        const micBtn = document.getElementById('mic-btn');
+        const API_BASE_URL = 'http://localhost:8000';
         let selectedImageBase64 = null;
         let selectedImageMimeType = null;
         let selectedImageName = null;
+        let selectedProMode = localStorage.getItem('chat_mode') || 'pro';
+        let recognition = null;
+        let isListening = false;
+
+        function getOrCreateSessionId() {
+            const key = 'chat_session_id';
+            let value = localStorage.getItem(key);
+            if (!value) {
+                value = (window.crypto && crypto.randomUUID)
+                    ? crypto.randomUUID()
+                    : `session-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+                localStorage.setItem(key, value);
+            }
+            return value;
+        }
+
+        const chatSessionId = getOrCreateSessionId();
+
+        function escapeHtml(text) {
+            return String(text)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+        }
+
+        function formatAssistantContent(text) {
+            const escaped = escapeHtml(String(text || ''));
+            const withLinks = escaped.replace(/(https?:\/\/[^\s<]+)/g, (url) => {
+                const clean = url.replace(/[),.;]+$/g, '');
+                const trailing = url.slice(clean.length);
+                return `<a href="${clean}" target="_blank" rel="noopener noreferrer" class="text-blue-400 underline break-all">${clean}</a>${trailing}`;
+            });
+            return withLinks.replace(/\n/g, '<br>');
+        }
+
+        function appendUserMessage(content) {
+            const chatContainer = document.getElementById('chat-container');
+            const userMsgDiv = document.createElement('div');
+            userMsgDiv.className = 'w-full flex justify-end';
+            userMsgDiv.innerHTML = `
+                <div class="bg-[#333537] text-white px-4 py-2 rounded-2xl max-w-[80%] rounded-tr-sm">
+                    ${escapeHtml(content).replace(/\n/g, '<br>')}
+                </div>
+            `;
+            chatContainer.appendChild(userMsgDiv);
+        }
+
+        function appendAssistantMessage(content) {
+            const chatContainer = document.getElementById('chat-container');
+            const assistantDiv = document.createElement('div');
+            assistantDiv.className = 'w-full flex justify-start items-start gap-3';
+            assistantDiv.innerHTML = `
+                <i class="ph-fill ph-sparkle text-[#4285f4] text-xl mt-1"></i>
+                <div class="text-[#e3e3e3] prose prose-invert max-w-none">
+                    ${formatAssistantContent(content)}
+                </div>
+            `;
+            chatContainer.appendChild(assistantDiv);
+        }
+
+        async function loadConversationHistory() {
+            const chatContainer = document.getElementById('chat-container');
+            const greeting = document.getElementById('greeting');
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/chat/history/${chatSessionId}`);
+                const data = await response.json();
+                const messages = Array.isArray(data.messages) ? data.messages : [];
+                if (!messages.length) {
+                    return;
+                }
+
+                if (greeting) {
+                    greeting.style.display = 'none';
+                }
+
+                for (const message of messages) {
+                    if (message.role === 'user') {
+                        appendUserMessage(message.content || '');
+                    } else {
+                        appendAssistantMessage(message.content || '');
+                    }
+                }
+
+                const mainContent = document.querySelector('main > div.overflow-y-auto');
+                mainContent.scrollTop = mainContent.scrollHeight;
+            } catch (err) {
+                console.warn('Could not load previous chat history:', err);
+            }
+        }
 
         function handleFileSelect(event) {
             const file = event.target.files?.[0];
@@ -320,6 +424,123 @@
 
             if (clearInput && imageInput) {
                 imageInput.value = '';
+            }
+        }
+
+        function applyToolSelection(tool) {
+            const inputField = document.getElementById('chat-input');
+            const imageInput = document.getElementById('image-input');
+
+            if (tool === 'web-search') {
+                inputField.value = 'Search the web for: ';
+            } else if (tool === 'ocr') {
+                inputField.value = 'Extract text from this image';
+                if (imageInput) {
+                    imageInput.click();
+                }
+            } else if (tool === 'rag') {
+                inputField.value = 'Use project knowledge base to answer: ';
+            } else if (tool === 'langsmith') {
+                inputField.value = 'Summarize recent LangSmith trace insights';
+            }
+
+            inputField.focus();
+
+            toolsOpen = false;
+            toolsDropdown.classList.add('hidden');
+            toolsBtn.classList.remove('bg-[#333537]');
+        }
+
+        function applyProSelection(mode) {
+            const modes = ['fast', 'think', 'pro'];
+            selectedProMode = modes.includes(mode) ? mode : 'pro';
+            localStorage.setItem('chat_mode', selectedProMode);
+
+            const labels = {
+                fast: 'Fast',
+                think: 'Think',
+                pro: 'Pro'
+            };
+            proModeLabel.textContent = labels[selectedProMode] || 'Pro';
+
+            modes.forEach((item) => {
+                const option = document.getElementById(`pro-option-${item}`);
+                const check = document.getElementById(`pro-check-${item}`);
+
+                if (!option || !check) return;
+
+                if (item === selectedProMode) {
+                    option.classList.add('bg-[#333537]/50');
+                    check.classList.remove('hidden');
+                } else {
+                    option.classList.remove('bg-[#333537]/50');
+                    check.classList.add('hidden');
+                }
+            });
+
+            proOpen = false;
+            proDropdown.classList.add('hidden');
+            proBtn.classList.remove('bg-[#333537]');
+        }
+
+        function initializeVoiceRecognition() {
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (!SpeechRecognition) {
+                return null;
+            }
+
+            const instance = new SpeechRecognition();
+            instance.lang = 'en-US';
+            instance.interimResults = true;
+            instance.continuous = false;
+
+            instance.onresult = (event) => {
+                const transcript = Array.from(event.results)
+                    .map(result => result[0]?.transcript || '')
+                    .join('')
+                    .trim();
+                if (transcript) {
+                    document.getElementById('chat-input').value = transcript;
+                }
+            };
+
+            instance.onend = () => {
+                isListening = false;
+                micBtn.classList.remove('text-red-400', 'bg-[#333537]');
+                micBtn.classList.add('text-[#c4c7c5]');
+            };
+
+            instance.onerror = () => {
+                isListening = false;
+                micBtn.classList.remove('text-red-400', 'bg-[#333537]');
+                micBtn.classList.add('text-[#c4c7c5]');
+            };
+
+            return instance;
+        }
+
+        function toggleVoiceInput() {
+            if (!recognition) {
+                recognition = initializeVoiceRecognition();
+            }
+
+            if (!recognition) {
+                alert('Voice input is not supported in this browser. Use Chrome/Edge on localhost.');
+                return;
+            }
+
+            if (isListening) {
+                recognition.stop();
+                return;
+            }
+
+            try {
+                recognition.start();
+                isListening = true;
+                micBtn.classList.remove('text-[#c4c7c5]');
+                micBtn.classList.add('text-red-400', 'bg-[#333537]');
+            } catch (_err) {
+                isListening = false;
             }
         }
 
@@ -388,6 +609,8 @@
 
         // Trigger resize event on load to set initial correct state
         window.dispatchEvent(new Event('resize'));
+        applyProSelection(selectedProMode);
+        loadConversationHistory();
 
         // Chat logic
         async function sendMessage() {
@@ -405,15 +628,10 @@
 
             // Append User Message
             const userVisibleMessage = message || 'Analyze this image';
-            const userMsgDiv = document.createElement('div');
-            userMsgDiv.className = 'w-full flex justify-end';
-            userMsgDiv.innerHTML = `
-                <div class="bg-[#333537] text-white px-4 py-2 rounded-2xl max-w-[80%] rounded-tr-sm">
-                    ${userVisibleMessage}
-                    ${selectedImageName ? `<div class="text-xs text-gray-300 mt-2">Image: ${selectedImageName}</div>` : ''}
-                </div>
-            `;
-            chatContainer.appendChild(userMsgDiv);
+            const userContentToShow = selectedImageName
+                ? `${userVisibleMessage}\n[Image: ${selectedImageName}]`
+                : userVisibleMessage;
+            appendUserMessage(userContentToShow);
             
             // Clear input
             inputField.value = '';
@@ -433,11 +651,12 @@
 
             try {
                 // Call FastAPI backend
-                const response = await fetch('http://localhost:8000/chat', {
+                const response = await fetch(`${API_BASE_URL}/chat`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         message: userVisibleMessage,
+                        session_id: chatSessionId,
                         image_base64: selectedImageBase64,
                         image_mime_type: selectedImageMimeType,
                         image_name: selectedImageName
@@ -451,7 +670,7 @@
                 agentLoadingDiv.innerHTML = `
                     <i class="ph-fill ph-sparkle text-[#4285f4] text-xl mt-1"></i>
                     <div class="text-[#e3e3e3] prose prose-invert max-w-none">
-                        ${(data.response || ('Error: ' + (data.error || data.detail || 'Unknown server error.'))).replace(/\\n/g, '<br>')}
+                        ${formatAssistantContent(data.response || ('Error: ' + (data.error || data.detail || 'Unknown server error.')))}
                     </div>
                 `;
             } catch (error) {

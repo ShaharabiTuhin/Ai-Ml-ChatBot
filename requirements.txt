@@ -12,3 +12,6 @@ ddgs
 faiss-cpu
 sentence-transformers
 pydantic
+pillow
+pytesseract
+easyocr

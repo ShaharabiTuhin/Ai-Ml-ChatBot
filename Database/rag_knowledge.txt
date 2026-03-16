@@ -1,0 +1,56 @@
+Retrieval-Augmented Generation (RAG)
+Last Updated: 8 Oct, 2025
+
+Definition:
+Retrieval-Augmented Generation (RAG) is an AI framework that combines information retrieval with text generation models to produce more accurate and up-to-date responses. Instead of relying only on model pretraining, RAG retrieves relevant documents from an external knowledge source before generating answers.
+
+Importance of RAG:
+- Access to updated knowledge from external data sources.
+- Improved accuracy and fewer hallucinations.
+- Domain-specific expertise without retraining the full model.
+- Cost efficiency by updating knowledge base instead of full model retraining.
+- Personalization via user-specific retrieval context.
+
+Core Components of RAG:
+1. External knowledge source (documents, APIs, databases)
+2. Text chunking and preprocessing
+3. Embedding model
+4. Vector database
+5. Query encoder
+6. Retriever
+7. Prompt augmentation layer
+8. LLM generator
+9. Optional updater for refreshing embeddings
+
+How RAG Works:
+1. Build external knowledge base by chunking and embedding data.
+2. Convert user query into embedding and retrieve relevant chunks.
+3. Augment prompt with retrieved context.
+4. Generate answer grounded in retrieved content.
+5. Refresh data/embeddings periodically.
+
+Problems RAG Solves:
+- Hallucinations
+- Outdated information
+- Poor contextual relevance in complex queries
+- Lack of domain-specific precision
+- High cost of frequent model fine-tuning
+- Cross-domain scalability needs
+
+Challenges:
+- Higher system complexity
+- Retrieval latency
+- Quality dependency on retrieval stage
+- Bias/fairness risks from source data
+
+Applications:
+- Question answering systems
+- Content creation and summarization
+- Conversational agents/chatbots
+- Information retrieval and synthesis
+- Educational assistance systems
+
+Alternatives to RAG:
+- Prompt engineering
+- Fine-tuning
+- Pre-training
