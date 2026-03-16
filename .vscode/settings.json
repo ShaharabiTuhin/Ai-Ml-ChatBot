@@ -1,0 +1,8 @@
+{
+  "python.defaultInterpreterPath": "/Users/shaharabi/Library/Python/3.9/bin/python3",
+  "python.analysis.extraPaths": [
+    "/Users/shaharabi/Library/Python/3.9/lib/python/site-packages"
+  ],
+  "python.analysis.typeCheckingMode": "basic",
+  "python.linting.enabled": false
+}

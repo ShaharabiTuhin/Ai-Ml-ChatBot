@@ -1,0 +1,41 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap');
+
+body {
+    font-family: 'Inter', sans-serif;
+    background-color: #131314;
+    /* Main background color from screenshot */
+    color: #e3e3e3;
+}
+
+/* Custom scrollbar for dark theme */
+::-webkit-scrollbar {
+    width: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #444746;
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #5f6368;
+}
+
+.gradient-text {
+    background: -webkit-linear-gradient(45deg, #4285f4, #d96570, #f4b400);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+.gemini-gradient {
+    background: linear-gradient(90deg, #4285f4, #d96570, #f4b400);
+}
+
+/* Smooth transitions for sidebar */
+.sidebar-transition {
+    transition: transform 0.3s ease, width 0.3s ease, opacity 0.3s ease;
+}

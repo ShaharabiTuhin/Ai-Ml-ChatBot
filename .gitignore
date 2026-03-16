@@ -1,0 +1,34 @@
+# Python virtual environment
+venv/
+env/
+.venv/
+ENV/
+
+# Environment variables — NEVER commit secrets
+.env
+.env.*
+!.env.example
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# FAISS index (large binary, regenerate via setup_faiss.py)
+Database/faiss_index/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs
+*.log

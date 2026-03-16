@@ -1,0 +1,8 @@
+
+        Project AI Chatbot Details:
+        Deadline: March 13th at 11:59PM.
+        Requirements: Front-end (UI/UX), Back-end (FastAPI, Python), Database (FAISS).
+        Tools Needed: Internet Search, OCR, and RAG.
+        Tracing: Must implement LangSmith tracing.
+        Developer Name: Tuhin.
+        

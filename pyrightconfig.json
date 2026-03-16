@@ -1,0 +1,12 @@
+{
+  "pythonVersion": "3.9",
+  "pythonPlatform": "Darwin",
+  "venvPath": ".",
+  "venv": "venv",
+  "extraPaths": [
+    "/Users/shaharabi/Library/Python/3.9/lib/python/site-packages"
+  ],
+  "typeCheckingMode": "basic",
+  "reportMissingImports": false,
+  "reportMissingModuleSource": false
+}
