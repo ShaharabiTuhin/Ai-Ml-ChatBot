@@ -4,10 +4,13 @@ import sqlite3
 import base64
 import binascii
 import io
+import json
 import re
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
+from urllib.parse import quote, urlencode
+from urllib.request import Request, urlopen
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -18,6 +21,15 @@ from dotenv import load_dotenv
 
 # LangChain Imports (lazy — loaded inside functions to avoid startup crashes)
 from langchain_core.messages import HumanMessage
+
+try:
+    from langsmith import traceable
+except Exception:
+    def traceable(*_args, **_kwargs):
+        def decorator(func):
+            return func
+
+        return decorator
 
 # Load environment variables
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -123,6 +135,7 @@ def get_retriever():
         return None
 
 
+@traceable(name="rag_retrieval", run_type="retriever")
 def get_rag_response(query: str) -> str:
     retriever = get_retriever()
     if not retriever:
@@ -159,7 +172,10 @@ def should_use_search(message: str) -> bool:
     normalized_message = message.lower()
     return any(
         keyword in normalized_message
-        for keyword in ["search", "web", "internet", "latest", "news", "find", "look up", "google"]
+        for keyword in [
+            "search", "web", "internet", "latest", "news", "find", "look up", "google",
+            "weather", "forecast", "temperature", "sehri", "suhoor", "iftar", "prayer time", "near me",
+        ]
     )
 
 
@@ -177,6 +193,76 @@ def extract_search_query(message: str) -> str:
     return normalized
 
 
+def extract_location_hint(message: str) -> str:
+    normalized = re.sub(r"\s+", " ", message.strip())
+    patterns = [
+        r"according to\s+(.+?)\s+what(?:'s| is)\b",
+        r"(?:weather|forecast|temperature|sehri|suhoor|iftar|prayer time).*?\b(?:in|on|for|at)\s+(.+?)(?:[?.!,]|$)",
+        r"\b(?:in|on|for|at)\s+(.+?)(?:[?.!,]|$)",
+    ]
+
+    for pattern in patterns:
+        match = re.search(pattern, normalized, flags=re.IGNORECASE)
+        if match:
+            location = match.group(1).strip(" .,!?")
+            if location:
+                return location
+
+    return ""
+
+
+def build_search_queries(message: str) -> list[str]:
+    cleaned_query = extract_search_query(message)
+    lowered_query = cleaned_query.lower()
+    location_hint = extract_location_hint(cleaned_query)
+
+    queries = [cleaned_query]
+
+    if location_hint:
+        if any(keyword in lowered_query for keyword in ["weather", "forecast", "temperature"]):
+            queries.extend(
+                [
+                    f"weather today in {location_hint}",
+                    f"today weather forecast {location_hint}",
+                ]
+            )
+
+        if any(keyword in lowered_query for keyword in ["sehri", "suhoor"]):
+            queries.extend(
+                [
+                    f"sehri time today in {location_hint}",
+                    f"suhoor time today in {location_hint}",
+                    f"ramadan timetable {location_hint}",
+                ]
+            )
+
+        if "iftar" in lowered_query:
+            queries.extend(
+                [
+                    f"iftar time today in {location_hint}",
+                    f"ramadan timetable {location_hint}",
+                ]
+            )
+
+        if "prayer time" in lowered_query:
+            queries.extend(
+                [
+                    f"prayer times today in {location_hint}",
+                    f"namaz timetable {location_hint}",
+                ]
+            )
+
+    deduped_queries: list[str] = []
+    seen = set()
+    for query in queries:
+        normalized_query = query.strip()
+        if normalized_query and normalized_query.lower() not in seen:
+            deduped_queries.append(normalized_query)
+            seen.add(normalized_query.lower())
+
+    return deduped_queries
+
+
 def is_ocr_request(message: str) -> bool:
     normalized_message = message.lower()
     return any(
@@ -185,12 +271,71 @@ def is_ocr_request(message: str) -> bool:
     )
 
 
+def is_location_request(message: str) -> bool:
+    normalized_message = message.lower()
+    return any(
+        keyword in normalized_message
+        for keyword in [
+            "my current location",
+            "where am i",
+            "where i am",
+            "my location",
+            "current location",
+            "trace my location",
+            "detect my location",
+        ]
+    )
+
+
+def is_direct_location_request(message: str) -> bool:
+    normalized_message = re.sub(r"\s+", " ", message.strip().lower())
+    direct_patterns = [
+        r"^what is my current location\??$",
+        r"^what is my location\??$",
+        r"^where am i\??$",
+        r"^trace my location\??$",
+        r"^detect my location\??$",
+    ]
+    return any(re.match(pattern, normalized_message) for pattern in direct_patterns)
+
+
+def is_weather_request(message: str) -> bool:
+    normalized_message = message.lower()
+    return any(keyword in normalized_message for keyword in ["weather", "forecast", "temperature"])
+
+
+def is_sehri_request(message: str) -> bool:
+    normalized_message = message.lower()
+    return any(keyword in normalized_message for keyword in ["sehri", "suhoor", "imsak"])
+
+
+def apply_location_to_message(message: str, location_primary: Optional[str]) -> str:
+    if not location_primary:
+        return message
+
+    updated_message = message
+    replacements = [
+        "my current location",
+        "my location",
+        "current location",
+        "on my location",
+        "in my location",
+        "near me",
+    ]
+
+    for phrase in replacements:
+        updated_message = re.sub(phrase, location_primary, updated_message, flags=re.IGNORECASE)
+
+    return updated_message
+
+
 def build_context_prompt(
     message: str,
     rag_context: str,
     web_context: str,
     has_image: bool,
     conversation_history: str = "",
+    location_context: str = "",
 ) -> str:
     instructions = [
         "You are a helpful AI assistant for this project.",
@@ -217,6 +362,9 @@ def build_context_prompt(
     if conversation_history:
         sections.append(f"Recent conversation context:\n{conversation_history}")
 
+    if location_context:
+        sections.append(f"User location context:\n{location_context}")
+
     if rag_context and rag_context != "Vector database is not initialized.":
         sections.append(f"RAG context:\n{rag_context}")
 
@@ -225,6 +373,293 @@ def build_context_prompt(
 
     sections.append(f"User request:\n{message}")
     return "\n\n".join(sections)
+
+
+def build_pdf_prompt(message: str, pdf_text: str, conversation_history: str = "", rag_context: str = "") -> str:
+    instructions = [
+        "You are a helpful AI assistant.",
+        "The user uploaded a PDF. Use the extracted PDF text as the primary source.",
+        "If the PDF text is incomplete, say so briefly.",
+        "Answer clearly and directly.",
+    ]
+
+    sections = ["\n".join(instructions)]
+
+    if conversation_history:
+        sections.append(f"Recent conversation context:\n{conversation_history}")
+
+    if rag_context and rag_context != "Vector database is not initialized.":
+        sections.append(f"RAG context:\n{rag_context}")
+
+    sections.append(f"Extracted PDF text:\n{pdf_text[:20000]}")
+    sections.append(f"User request:\n{message}")
+    return "\n\n".join(sections)
+
+
+def fetch_json(url: str) -> dict:
+    request = Request(
+        url,
+        headers={
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X) AIChatBot/1.0",
+            "Accept": "application/json",
+        },
+    )
+    with urlopen(request, timeout=20) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def geocode_location_name(location_name: str) -> Optional[tuple[float, float]]:
+    if not location_name.strip():
+        return None
+
+    query = urlencode(
+        {
+            "q": location_name,
+            "format": "jsonv2",
+            "limit": 1,
+        }
+    )
+
+    request = Request(
+        f"https://nominatim.openstreetmap.org/search?{query}",
+        headers={
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X) AIChatBot/1.0",
+            "Accept": "application/json",
+        },
+    )
+
+    try:
+        with urlopen(request, timeout=20) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+            if not payload:
+                return None
+            lat = float(payload[0].get("lat"))
+            lon = float(payload[0].get("lon"))
+            return lat, lon
+    except Exception as exc:
+        logger.warning("Location geocoding failed for '%s': %s", location_name, exc)
+        return None
+
+
+def weather_code_to_text(weather_code: Optional[int]) -> str:
+    code_map = {
+        0: "Clear sky",
+        1: "Mainly clear",
+        2: "Partly cloudy",
+        3: "Overcast",
+        45: "Fog",
+        48: "Depositing rime fog",
+        51: "Light drizzle",
+        53: "Moderate drizzle",
+        55: "Dense drizzle",
+        56: "Light freezing drizzle",
+        57: "Dense freezing drizzle",
+        61: "Slight rain",
+        63: "Moderate rain",
+        65: "Heavy rain",
+        66: "Light freezing rain",
+        67: "Heavy freezing rain",
+        71: "Slight snow",
+        73: "Moderate snow",
+        75: "Heavy snow",
+        77: "Snow grains",
+        80: "Slight rain showers",
+        81: "Moderate rain showers",
+        82: "Violent rain showers",
+        85: "Slight snow showers",
+        86: "Heavy snow showers",
+        95: "Thunderstorm",
+        96: "Thunderstorm with slight hail",
+        99: "Thunderstorm with heavy hail",
+    }
+    return code_map.get(weather_code or -1, "Unavailable")
+
+
+@traceable(name="google_grounded_search", run_type="tool")
+def search_google_with_sources(query: str, max_results: int = 5) -> list[dict[str, str]]:
+    api_key = os.getenv("GOOGLE_SEARCH_API_KEY", "").strip()
+    cse_id = os.getenv("GOOGLE_SEARCH_CSE_ID", "").strip()
+    if not api_key or not cse_id:
+        return []
+
+    params = urlencode(
+        {
+            "key": api_key,
+            "cx": cse_id,
+            "q": query,
+            "num": max(1, min(max_results, 10)),
+        }
+    )
+
+    request = Request(
+        f"https://www.googleapis.com/customsearch/v1?{params}",
+        headers={
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X) AIChatBot/1.0",
+            "Accept": "application/json",
+        },
+    )
+
+    try:
+        with urlopen(request, timeout=20) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except Exception as exc:
+        logger.warning("Google grounded search failed: %s", exc)
+        return []
+
+    items = payload.get("items") or []
+    results: list[dict[str, str]] = []
+    for item in items:
+        url = (item.get("link") or "").strip()
+        if not url:
+            continue
+        results.append(
+            {
+                "title": (item.get("title") or "Untitled").strip(),
+                "url": url,
+                "body": (item.get("snippet") or "").strip(),
+            }
+        )
+
+    return results
+
+
+def get_weather_response(chat: "ChatMessage") -> Optional[str]:
+    if not (chat.user_location_primary or (chat.user_latitude is not None and chat.user_longitude is not None)):
+        return None
+
+    try:
+        if chat.user_latitude is not None and chat.user_longitude is not None:
+            location_query = f"{chat.user_latitude:.4f},{chat.user_longitude:.4f}"
+        else:
+            location_query = chat.user_location_primary or ""
+
+        weather_data = fetch_json(f"https://wttr.in/{quote(location_query)}?format=j1")
+        current = (weather_data.get("current_condition") or [{}])[0]
+        today = (weather_data.get("weather") or [{}])[0]
+        hourly = (today.get("hourly") or [{}])[0]
+
+        area_names = [
+            area.get("value", "")
+            for area in ((weather_data.get("nearest_area") or [{}])[0].get("areaName") or [])
+            if area.get("value")
+        ]
+        resolved_location = area_names[0] if area_names else (chat.user_location_primary or location_query)
+        condition = ((current.get("weatherDesc") or [{"value": ""}])[0].get("value") or "Unavailable").strip()
+        temp_c = current.get("temp_C", "N/A")
+        feels_like_c = current.get("FeelsLikeC", "N/A")
+        humidity = current.get("humidity", "N/A")
+        wind_kmph = current.get("windspeedKmph", "N/A")
+        rain_chance = hourly.get("chanceofrain", "N/A")
+
+        has_primary_data = (
+            condition and condition.lower() != "unavailable"
+            and temp_c != "N/A"
+            and feels_like_c != "N/A"
+            and humidity != "N/A"
+            and wind_kmph != "N/A"
+        )
+
+        if has_primary_data:
+            return (
+                f"Today's weather update for {resolved_location}: {condition}. "
+                f"Temperature {temp_c}°C, feels like {feels_like_c}°C, humidity {humidity}%, "
+                f"wind {wind_kmph} km/h, chance of rain {rain_chance}%."
+            )
+    except Exception as exc:
+        logger.warning("Weather lookup failed from wttr.in: %s", exc)
+
+    try:
+        latitude = chat.user_latitude
+        longitude = chat.user_longitude
+
+        if latitude is None or longitude is None:
+            if not chat.user_location_primary:
+                return None
+            resolved_coords = geocode_location_name(chat.user_location_primary)
+            if not resolved_coords:
+                return None
+            latitude, longitude = resolved_coords
+
+        meteo_query = urlencode(
+            {
+                "latitude": f"{latitude:.5f}",
+                "longitude": f"{longitude:.5f}",
+                "current": "temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m",
+                "daily": "precipitation_probability_max",
+                "timezone": "auto",
+                "forecast_days": 1,
+            }
+        )
+        meteo_data = fetch_json(f"https://api.open-meteo.com/v1/forecast?{meteo_query}")
+
+        current = meteo_data.get("current") or {}
+        daily = meteo_data.get("daily") or {}
+
+        temp_c = current.get("temperature_2m")
+        feels_like_c = current.get("apparent_temperature")
+        humidity = current.get("relative_humidity_2m")
+        wind_kmph = current.get("wind_speed_10m")
+        weather_code = current.get("weather_code")
+        rain_probability = (daily.get("precipitation_probability_max") or ["N/A"])[0]
+
+        if temp_c is None and feels_like_c is None and humidity is None and wind_kmph is None:
+            return None
+
+        resolved_location = chat.user_location_primary or f"{latitude:.4f}, {longitude:.4f}"
+        condition = weather_code_to_text(weather_code)
+
+        return (
+            f"Today's weather update for {resolved_location}: {condition}. "
+            f"Temperature {temp_c if temp_c is not None else 'N/A'}°C, "
+            f"feels like {feels_like_c if feels_like_c is not None else 'N/A'}°C, "
+            f"humidity {humidity if humidity is not None else 'N/A'}%, "
+            f"wind {wind_kmph if wind_kmph is not None else 'N/A'} km/h, "
+            f"chance of rain {rain_probability}%.")
+    except Exception as exc:
+        logger.warning("Weather lookup failed from Open-Meteo fallback: %s", exc)
+        return None
+
+
+def get_sehri_response(chat: "ChatMessage") -> Optional[str]:
+    if not (chat.user_location_primary or (chat.user_latitude is not None and chat.user_longitude is not None)):
+        return None
+
+    try:
+        if chat.user_latitude is not None and chat.user_longitude is not None:
+            url = (
+                "https://api.aladhan.com/v1/timings?"
+                f"latitude={chat.user_latitude}&longitude={chat.user_longitude}&method=1"
+            )
+        else:
+            city = (chat.user_location_primary or "").split(",", 1)[0].strip()
+            country = ""
+            if chat.user_location_primary and "," in chat.user_location_primary:
+                country = chat.user_location_primary.split(",", 1)[1].strip()
+            url = (
+                "https://api.aladhan.com/v1/timingsByCity?"
+                f"city={quote(city)}&country={quote(country)}&method=1"
+            )
+
+        prayer_data = fetch_json(url)
+        timings = (prayer_data.get("data") or {}).get("timings") or {}
+        imsak = timings.get("Imsak")
+        fajr = timings.get("Fajr")
+        readable_date = ((prayer_data.get("data") or {}).get("date") or {}).get("readable") or datetime.now().strftime("%d %b %Y")
+        location_name = chat.user_location_primary or "your location"
+
+        if not imsak and not fajr:
+            return None
+
+        parts = [f"Today's Sehri time for {location_name} on {readable_date}:"]
+        if imsak:
+            parts.append(f"Imsak {imsak}")
+        if fajr:
+            parts.append(f"Fajr {fajr}")
+
+        return ". ".join(parts) + "."
+    except Exception as exc:
+        logger.warning("Sehri lookup failed: %s", exc)
+        return None
 
 
 def get_local_fallback_response(message: str) -> str:
@@ -270,6 +705,7 @@ def get_local_fallback_response(message: str) -> str:
     )
 
 
+@traceable(name="internet_search_tool", run_type="tool")
 def web_search(query: str) -> str:
     try:
         from langchain_community.tools.ddg_search import DuckDuckGoSearchRun
@@ -279,12 +715,13 @@ def web_search(query: str) -> str:
         return ""
 
 
+@traceable(name="search_with_references", run_type="tool")
 def search_web_with_sources(query: str, max_results: int = 5) -> tuple[str, list[dict[str, str]]]:
     cleaned_query = extract_search_query(query)
     try:
         results = []
 
-        search_queries = [cleaned_query]
+        search_queries = build_search_queries(query)
         lowered_query = cleaned_query.lower()
         if "bangladesh" in lowered_query and "parliament" in lowered_query and ("member" in lowered_query or "name" in lowered_query):
             search_queries.extend([
@@ -293,11 +730,26 @@ def search_web_with_sources(query: str, max_results: int = 5) -> tuple[str, list
                 "bangladesh parliament members list official",
             ])
 
+        google_seen_urls = set()
+        for query_variant in search_queries:
+            for item in search_google_with_sources(query_variant, max_results=max_results):
+                url = (item.get("url") or "").strip()
+                if not url or url in google_seen_urls:
+                    continue
+                google_seen_urls.add(url)
+                results.append(
+                    {
+                        "title": item.get("title", "Untitled"),
+                        "href": url,
+                        "body": item.get("body", ""),
+                    }
+                )
+
         try:
             from ddgs import DDGS
 
             for query_variant in search_queries:
-                for backend in ["auto", "lite", "bing"]:
+                for backend in ["bing", "duckduckgo", "brave", "yahoo"]:
                     try:
                         attempt = DDGS().text(query_variant, max_results=max_results * 2, backend=backend)
                         if attempt:
@@ -418,6 +870,43 @@ def validate_and_decode_image(image_base64: str, image_mime_type: str) -> bytes:
     return image_bytes
 
 
+def validate_and_decode_pdf(document_base64: str, document_mime_type: str) -> bytes:
+    allowed_types = {"application/pdf"}
+    if document_mime_type not in allowed_types:
+        raise RuntimeError(f"Unsupported document type: {document_mime_type}. Allowed: application/pdf")
+
+    try:
+        document_bytes = base64.b64decode(document_base64, validate=True)
+    except (binascii.Error, ValueError):
+        raise RuntimeError("Invalid document payload: document_base64 is not valid base64")
+
+    max_size = 12 * 1024 * 1024
+    if len(document_bytes) > max_size:
+        raise RuntimeError("PDF too large. Maximum allowed size is 12MB")
+
+    return document_bytes
+
+
+def extract_pdf_text(document_bytes: bytes) -> str:
+    try:
+        import fitz
+    except Exception as exc:
+        logger.warning("PyMuPDF is unavailable for PDF extraction: %s", exc)
+        raise RuntimeError("PDF analysis requires PyMuPDF. Install with: pip install pymupdf")
+
+    try:
+        text_parts: list[str] = []
+        with fitz.open(stream=document_bytes, filetype="pdf") as doc:
+            for page in doc:
+                page_text = page.get_text("text").strip()
+                if page_text:
+                    text_parts.append(page_text)
+        return "\n\n".join(text_parts).strip()
+    except Exception as exc:
+        logger.warning("PDF text extraction failed: %s", exc)
+        raise RuntimeError("Could not parse the PDF file.")
+
+
 def local_ocr_extract_text(image_bytes: bytes) -> str:
     try:
         from PIL import Image
@@ -454,6 +943,7 @@ def local_ocr_extract_text(image_bytes: bytes) -> str:
         return ""
 
 
+@traceable(name="text_chat_chain", run_type="chain")
 def do_text_chat(message: str, session_id: str) -> str:
     """Text-only path: Groq + RAG + optional web search."""
     use_search = should_use_search(message)
@@ -483,6 +973,7 @@ def do_text_chat(message: str, session_id: str) -> str:
     return answer
 
 
+@traceable(name="image_chat_chain", run_type="chain")
 def do_image_chat(message: str, image_base64: str, image_mime_type: str, session_id: str) -> str:
     """Image path: Gemini Vision first, then local OCR fallback when Gemini fails."""
     image_bytes = validate_and_decode_image(image_base64, image_mime_type)
@@ -522,6 +1013,26 @@ def do_image_chat(message: str, image_base64: str, image_mime_type: str, session
     return normalize_response_content(fallback_response.content)
 
 
+@traceable(name="pdf_chat_chain", run_type="chain")
+def do_pdf_chat(message: str, document_base64: str, document_mime_type: str, session_id: str) -> str:
+    document_bytes = validate_and_decode_pdf(document_base64, document_mime_type)
+    extracted_text = extract_pdf_text(document_bytes)
+    if not extracted_text:
+        raise RuntimeError("No readable text found in the uploaded PDF.")
+
+    history = get_recent_chat_history(session_id, limit=12)
+    rag_context = get_rag_response(message)
+    prompt = build_pdf_prompt(
+        message=message,
+        pdf_text=extracted_text,
+        conversation_history=format_chat_history(history),
+        rag_context=rag_context,
+    )
+
+    response = get_groq_llm().invoke([HumanMessage(content=prompt)])
+    return normalize_response_content(response.content)
+
+
 def build_error_payload(code: str, message: str, details: Optional[str] = None) -> dict:
     payload = {
         "error": message,
@@ -538,27 +1049,116 @@ def build_error_payload(code: str, message: str, details: Optional[str] = None) 
 class ChatMessage(BaseModel):
     message: str = ""
     session_id: Optional[str] = None
+    user_location_primary: Optional[str] = None
+    user_location_secondary: Optional[str] = None
+    user_latitude: Optional[float] = None
+    user_longitude: Optional[float] = None
     image_base64: Optional[str] = None
     image_mime_type: Optional[str] = None
     image_name: Optional[str] = None
+    document_base64: Optional[str] = None
+    document_mime_type: Optional[str] = None
+    document_name: Optional[str] = None
+
+
+def build_location_context(chat: ChatMessage) -> str:
+    parts = []
+    if chat.user_location_primary:
+        parts.append(f"Primary location: {chat.user_location_primary}")
+    if chat.user_location_secondary:
+        parts.append(f"Location source: {chat.user_location_secondary}")
+    if chat.user_latitude is not None and chat.user_longitude is not None:
+        parts.append(f"Coordinates: {chat.user_latitude}, {chat.user_longitude}")
+    return "\n".join(parts)
+
+
+def get_location_response(chat: ChatMessage) -> Optional[str]:
+    if not is_direct_location_request(chat.message):
+        return None
+
+    if chat.user_location_primary:
+        response = f"Your current detected location is {chat.user_location_primary}."
+        if chat.user_location_secondary:
+            response += f" {chat.user_location_secondary}."
+        if chat.user_latitude is not None and chat.user_longitude is not None:
+            response += f" Coordinates: {chat.user_latitude:.5f}, {chat.user_longitude:.5f}."
+        return response
+
+    return (
+        "I do not have your current location yet. Please click 'Update location' in the sidebar "
+        "and allow browser location access, then ask again."
+    )
+
+
+@traceable(name="text_chat_with_context_chain", run_type="chain")
+def do_text_chat_with_context(message: str, session_id: str, location_context: str = "") -> str:
+    use_search = should_use_search(message)
+    rag_context = "" if use_search else (get_rag_response(message) or get_text_fallback_response())
+    web_context = ""
+    web_sources: list[dict[str, str]] = []
+    if use_search:
+        web_context, web_sources = search_web_with_sources(message)
+        if not web_sources and not web_context:
+            return (
+                "I could not fetch reliable web results right now. Please try again in a moment."
+            )
+
+    history = get_recent_chat_history(session_id, limit=12)
+    prompt = build_context_prompt(
+        message,
+        rag_context=rag_context,
+        web_context=web_context,
+        has_image=False,
+        conversation_history=format_chat_history(history),
+        location_context=location_context,
+    )
+    resp = get_groq_llm().invoke([HumanMessage(content=prompt)])
+    answer = normalize_response_content(resp.content)
+    references = format_reference_links(web_sources)
+    if references:
+        answer = f"{answer}\n\n{references}"
+    return answer
 
 
 @app.post("/chat")
 async def chat_endpoint(chat: ChatMessage):
     message = chat.message.strip() or "Analyze this image."
     session_id = (chat.session_id or "default-session").strip() or "default-session"
+    location_context = build_location_context(chat)
+    enriched_message = apply_location_to_message(message, chat.user_location_primary)
 
-    user_content = message
+    user_content = enriched_message
     if chat.image_name:
-        user_content = f"{message}\n[Image: {chat.image_name}]"
+        user_content = f"{enriched_message}\n[Image: {chat.image_name}]"
+    elif chat.document_name:
+        user_content = f"{enriched_message}\n[PDF: {chat.document_name}]"
 
     save_chat_message(session_id, "user", user_content)
 
     try:
-        if chat.image_base64 and chat.image_mime_type:
-            response_text = do_image_chat(message, chat.image_base64, chat.image_mime_type, session_id)
+        location_response = get_location_response(chat)
+        if location_response:
+            save_chat_message(session_id, "assistant", location_response)
+            return {"response": location_response, "session_id": session_id}
+
+        if is_sehri_request(enriched_message):
+            sehri_response = get_sehri_response(chat)
+            if sehri_response:
+                save_chat_message(session_id, "assistant", sehri_response)
+                return {"response": sehri_response, "session_id": session_id}
+
+        if is_weather_request(enriched_message):
+            weather_response = get_weather_response(chat)
+            if weather_response:
+                save_chat_message(session_id, "assistant", weather_response)
+                return {"response": weather_response, "session_id": session_id}
+
+        if chat.document_base64 and chat.document_mime_type:
+            response_text = do_pdf_chat(enriched_message, chat.document_base64, chat.document_mime_type, session_id)
+        elif chat.image_base64 and chat.image_mime_type:
+            response_text = do_image_chat(enriched_message, chat.image_base64, chat.image_mime_type, session_id)
         else:
-            response_text = do_text_chat(message, session_id)
+            response_text = do_text_chat_with_context(enriched_message, session_id, location_context)
 
         save_chat_message(session_id, "assistant", response_text)
         return {"response": response_text, "session_id": session_id}

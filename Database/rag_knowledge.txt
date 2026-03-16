@@ -54,3 +54,15 @@ Alternatives to RAG:
 - Prompt engineering
 - Fine-tuning
 - Pre-training
+
+---
+
+Project Feature Updates (Current Build):
+- Backend: FastAPI + Groq text model with optional Gemini vision path.
+- Retrieval: FAISS index built from `Database/*.txt` using `all-MiniLM-L6-v2` embeddings.
+- Search: Structured web search with references and Google-grounded search path (Google CSE when configured).
+- OCR: Image text extraction via Gemini Vision with local fallback (pytesseract/EasyOCR).
+- PDF Analysis: Added document upload and analysis via PyMuPDF (`pymupdf`).
+- Location Awareness: Supports browser-provided location context, weather updates, and Sehri time responses.
+- Conversation Memory: Session-based chat history persisted in SQLite.
+- Tracing: LangSmith-compatible `@traceable` hooks for tools/chains/retriever.

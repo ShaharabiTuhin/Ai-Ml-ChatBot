@@ -15,3 +15,5 @@ pydantic
 pillow
 pytesseract
 easyocr
+langsmith
+pymupdf

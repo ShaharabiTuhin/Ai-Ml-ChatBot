@@ -1,8 +1,16 @@
+Project AI Chatbot Details:
+Deadline: March 13th at 11:59 PM.
+Requirements: Front-end (UI/UX), Back-end (FastAPI, Python), Database (FAISS).
 
-        Project AI Chatbot Details:
-        Deadline: March 13th at 11:59PM.
-        Requirements: Front-end (UI/UX), Back-end (FastAPI, Python), Database (FAISS).
-        Tools Needed: Internet Search, OCR, and RAG.
-        Tracing: Must implement LangSmith tracing.
-        Developer Name: Tuhin.
-        
+Implemented Tools and Features:
+- Internet Search with references
+- Google-grounded search path (Google CSE + fallback search)
+- OCR for images (Gemini Vision + local OCR fallback)
+- RAG retrieval using FAISS + sentence-transformer embeddings
+- PDF analysis using PyMuPDF
+- Location-aware responses (current location, weather, Sehri)
+- Session-based conversation history storage (SQLite)
+- Voice input (browser speech recognition)
+- LangSmith tracing hooks for chains, tools, and retriever
+
+Developer Name: Tuhin.

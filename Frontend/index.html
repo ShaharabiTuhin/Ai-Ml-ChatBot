@@ -21,7 +21,7 @@
             <button onclick="toggleSidebar()" class="p-2 hover:bg-[#333537] rounded-full transition-colors md:hidden">
                 <i class="ph ph-list text-2xl text-[#c4c7c5]"></i>
             </button>
-            <button class="p-2 hover:bg-[#333537] rounded-full transition-colors ml-auto">
+            <button onclick="startNewChat()" class="p-2 hover:bg-[#333537] rounded-full transition-colors ml-auto" title="New chat">
                 <i class="ph ph-note-pencil text-2xl text-[#c4c7c5]"></i>
             </button>
         </div>
@@ -30,17 +30,17 @@
         <div class="flex-1 overflow-y-auto px-3 py-2 space-y-1">
             <p class="text-xs font-semibold text-[#c4c7c5] px-3 mb-2 mt-4 uppercase tracking-wider">Project Features</p>
 
-            <a href="#"
+            <a href="#" onclick="handleSidebarFeature('langsmith'); return false;"
                 class="flex items-center gap-3 px-3 py-2.5 rounded-full hover:bg-[#333537] transition-colors text-sm text-[#e3e3e3]">
                 <i class="ph ph-clock-counter-clockwise text-xl"></i>
                 LangSmith Traces
             </a>
-            <a href="#"
+            <a href="#" onclick="handleSidebarFeature('rag'); return false;"
                 class="flex items-center gap-3 px-3 py-2.5 rounded-full hover:bg-[#333537] transition-colors text-sm text-[#e3e3e3]">
                 <i class="ph ph-database text-xl text-blue-400"></i>
                 Vector DB (FAISS)
             </a>
-            <a href="#"
+            <a href="#" onclick="handleSidebarFeature('agents'); return false;"
                 class="flex items-center gap-3 px-3 py-2.5 rounded-full hover:bg-[#333537] transition-colors text-sm text-[#e3e3e3]">
                 <i class="ph ph-plugs-connected text-xl text-green-400"></i>
                 Active Agents
@@ -48,12 +48,12 @@
 
             <div class="my-4 border-t border-[#333537]"></div>
 
-            <a href="#"
+            <a href="#" onclick="handleSidebarFeature('settings'); return false;"
                 class="flex items-center gap-3 px-3 py-2.5 rounded-full hover:bg-[#333537] transition-colors text-sm text-[#e3e3e3]">
                 <i class="ph ph-gear text-xl"></i>
                 Settings
             </a>
-            <a href="#"
+            <a href="#" onclick="handleSidebarFeature('help'); return false;"
                 class="flex items-center gap-3 px-3 py-2.5 rounded-full hover:bg-[#333537] transition-colors text-sm text-[#e3e3e3]">
                 <i class="ph ph-info text-xl"></i>
                 Project Help
@@ -66,9 +66,9 @@
                 class="flex items-start gap-3 px-3 py-2 rounded-xl hover:bg-[#333537] transition-colors cursor-pointer">
                 <div class="w-2 h-2 mt-1.5 rounded-full bg-blue-500"></div>
                 <div class="flex flex-col">
-                    <span class="text-xs text-[#e3e3e3]">Chattogram, Bangladesh</span>
-                    <span class="text-[10px] text-[#c4c7c5]">From your IP address</span>
-                    <span class="text-[10px] text-blue-400 mt-0.5">Update location</span>
+                    <span id="location-primary" class="text-xs text-[#e3e3e3]">Location unavailable</span>
+                    <span id="location-secondary" class="text-[10px] text-[#c4c7c5]">Click update to detect your location</span>
+                    <button id="location-refresh" type="button" onclick="updateUserLocation()" class="text-[10px] text-blue-400 mt-0.5 text-left hover:underline">Update location</button>
                 </div>
             </div>
         </div>
@@ -113,7 +113,7 @@
                         <i class="ph-fill ph-sparkle text-[#4285f4]"></i>
                         <span class="gradient-text">Hi Tuhin</span>
                     </h1>
-                    <h2 class="text-3xl sm:text-5xl font-medium text-[#444746]">
+                    <h2 class="text-3xl sm:text-5xl font-medium text-[#c4c7c5]">
                         Where should we start?
                     </h2>
                 </div>
@@ -168,7 +168,7 @@
                 <div
                     class="bg-[#1e1f20] rounded-[32px] sm:rounded-full flex flex-col sm:flex-row items-center p-2 border border-[#333537] shadow-lg focus-within:ring-1 focus-within:ring-[#4285f4] transition-shadow">
 
-                    <input id="image-input" type="file" accept="image/*" class="hidden" onchange="handleFileSelect(event)">
+                    <input id="image-input" type="file" accept="image/*,.pdf,application/pdf" class="hidden" onchange="handleFileSelect(event)">
 
                     <div class="flex items-center gap-1 w-full sm:w-auto px-2 mb-2 sm:mb-0">
                         <button onclick="document.getElementById('image-input').click()" class="p-2.5 hover:bg-[#333537] rounded-full transition-colors text-[#c4c7c5]"
@@ -287,13 +287,25 @@
         const proBtn = document.getElementById('pro-btn');
         const proModeLabel = document.getElementById('pro-mode-label');
         const micBtn = document.getElementById('mic-btn');
+        const locationPrimary = document.getElementById('location-primary');
+        const locationSecondary = document.getElementById('location-secondary');
+        const locationRefreshBtn = document.getElementById('location-refresh');
         const API_BASE_URL = 'http://localhost:8000';
         let selectedImageBase64 = null;
         let selectedImageMimeType = null;
         let selectedImageName = null;
+        let selectedDocumentBase64 = null;
+        let selectedDocumentMimeType = null;
+        let selectedDocumentName = null;
         let selectedProMode = localStorage.getItem('chat_mode') || 'pro';
         let recognition = null;
         let isListening = false;
+        let detectedLocationPrimary = localStorage.getItem('user_location_primary') || null;
+        let detectedLocationSecondary = localStorage.getItem('user_location_secondary') || null;
+        let detectedLatitude = localStorage.getItem('user_location_latitude') || null;
+        let detectedLongitude = localStorage.getItem('user_location_longitude') || null;
+        let userHasInteracted = false;
+        let historyHydrated = false;
 
         function getOrCreateSessionId() {
             const key = 'chat_session_id';
@@ -353,7 +365,138 @@
             chatContainer.appendChild(assistantDiv);
         }
 
+        function setLocationState(primary, secondary, loading = false) {
+            locationPrimary.textContent = primary;
+            locationSecondary.textContent = secondary;
+            locationRefreshBtn.disabled = loading;
+            locationRefreshBtn.textContent = loading ? 'Detecting location...' : 'Update location';
+            locationRefreshBtn.classList.toggle('opacity-60', loading);
+        }
+
+        function saveLocationSnapshot(primary, secondary) {
+            detectedLocationPrimary = primary;
+            detectedLocationSecondary = secondary;
+            localStorage.setItem('user_location_primary', primary);
+            localStorage.setItem('user_location_secondary', secondary);
+        }
+
+        function saveLocationCoordinates(latitude, longitude) {
+            detectedLatitude = latitude != null ? String(latitude) : null;
+            detectedLongitude = longitude != null ? String(longitude) : null;
+
+            if (detectedLatitude && detectedLongitude) {
+                localStorage.setItem('user_location_latitude', detectedLatitude);
+                localStorage.setItem('user_location_longitude', detectedLongitude);
+            } else {
+                localStorage.removeItem('user_location_latitude');
+                localStorage.removeItem('user_location_longitude');
+            }
+        }
+
+        function restoreSavedLocation() {
+            const savedPrimary = localStorage.getItem('user_location_primary');
+            const savedSecondary = localStorage.getItem('user_location_secondary');
+            if (savedPrimary && savedSecondary) {
+                detectedLocationPrimary = savedPrimary;
+                detectedLocationSecondary = savedSecondary;
+                setLocationState(savedPrimary, savedSecondary, false);
+            }
+        }
+
+        async function reverseGeocode(latitude, longitude) {
+            const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${latitude}&lon=${longitude}`;
+            const response = await fetch(url, {
+                headers: {
+                    'Accept': 'application/json'
+                }
+            });
+            if (!response.ok) {
+                throw new Error('Reverse geocoding failed');
+            }
+
+            const data = await response.json();
+            const address = data.address || {};
+            const city = address.city || address.town || address.village || address.county || 'Unknown area';
+            const country = address.country || 'Unknown country';
+            return {
+                primary: `${city}, ${country}`,
+                secondary: 'Using precise browser location'
+            };
+        }
+
+        async function fetchApproximateLocationFromIP() {
+            const response = await fetch('https://ipwho.is/');
+            if (!response.ok) {
+                throw new Error('IP lookup failed');
+            }
+
+            const data = await response.json();
+            if (data.success === false) {
+                throw new Error(data.message || 'IP lookup failed');
+            }
+
+            const city = data.city || data.region || 'Unknown area';
+            const country = data.country || 'Unknown country';
+            return {
+                primary: `${city}, ${country}`,
+                secondary: 'Approximate location from your IP address'
+            };
+        }
+
+        async function updateUserLocation() {
+            setLocationState('Detecting location...', 'Requesting permission or IP lookup', true);
+
+            const applyResolvedLocation = (result) => {
+                setLocationState(result.primary, result.secondary, false);
+                saveLocationSnapshot(result.primary, result.secondary);
+                saveLocationCoordinates(result.latitude, result.longitude);
+            };
+
+            const fallbackToIP = async () => {
+                try {
+                    const ipLocation = await fetchApproximateLocationFromIP();
+                    applyResolvedLocation(ipLocation);
+                } catch (_error) {
+                    saveLocationCoordinates(null, null);
+                    setLocationState('Location unavailable', 'Could not detect location from browser or IP', false);
+                }
+            };
+
+            if (!navigator.geolocation) {
+                await fallbackToIP();
+                return;
+            }
+
+            navigator.geolocation.getCurrentPosition(
+                async (position) => {
+                    try {
+                        const preciseLocation = await reverseGeocode(
+                            position.coords.latitude,
+                            position.coords.longitude
+                        );
+                        preciseLocation.latitude = position.coords.latitude;
+                        preciseLocation.longitude = position.coords.longitude;
+                        applyResolvedLocation(preciseLocation);
+                    } catch (_error) {
+                        await fallbackToIP();
+                    }
+                },
+                async () => {
+                    await fallbackToIP();
+                },
+                {
+                    enableHighAccuracy: true,
+                    timeout: 10000,
+                    maximumAge: 300000,
+                }
+            );
+        }
+
         async function loadConversationHistory() {
+            if (historyHydrated || userHasInteracted) {
+                return;
+            }
+
             const chatContainer = document.getElementById('chat-container');
             const greeting = document.getElementById('greeting');
 
@@ -361,7 +504,13 @@
                 const response = await fetch(`${API_BASE_URL}/chat/history/${chatSessionId}`);
                 const data = await response.json();
                 const messages = Array.isArray(data.messages) ? data.messages : [];
+
+                if (userHasInteracted) {
+                    return;
+                }
+
                 if (!messages.length) {
+                    historyHydrated = true;
                     return;
                 }
 
@@ -379,6 +528,7 @@
 
                 const mainContent = document.querySelector('main > div.overflow-y-auto');
                 mainContent.scrollTop = mainContent.scrollHeight;
+                historyHydrated = true;
             } catch (err) {
                 console.warn('Could not load previous chat history:', err);
             }
@@ -393,19 +543,37 @@
                 return;
             }
 
-            if (!file.type.startsWith('image/')) {
-                fileLabel.classList.remove('hidden');
-                fileLabel.textContent = 'Only image uploads are supported right now.';
-                clearSelectedFile(false);
-                return;
-            }
-
             const reader = new FileReader();
             reader.onload = () => {
                 const result = String(reader.result || '');
+
+                if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
+                    selectedDocumentBase64 = result.split(',')[1] || null;
+                    selectedDocumentMimeType = 'application/pdf';
+                    selectedDocumentName = file.name;
+
+                    selectedImageBase64 = null;
+                    selectedImageMimeType = null;
+                    selectedImageName = null;
+
+                    fileLabel.classList.remove('hidden');
+                    fileLabel.textContent = `Selected PDF: ${file.name}`;
+                    return;
+                }
+
+                if (!file.type.startsWith('image/')) {
+                    fileLabel.classList.remove('hidden');
+                    fileLabel.textContent = 'Only image or PDF uploads are supported right now.';
+                    clearSelectedFile(false);
+                    return;
+                }
+
                 selectedImageBase64 = result.split(',')[1] || null;
                 selectedImageMimeType = file.type;
                 selectedImageName = file.name;
+                selectedDocumentBase64 = null;
+                selectedDocumentMimeType = null;
+                selectedDocumentName = null;
                 fileLabel.classList.remove('hidden');
                 fileLabel.textContent = `Selected image: ${file.name}`;
             };
@@ -416,6 +584,9 @@
             selectedImageBase64 = null;
             selectedImageMimeType = null;
             selectedImageName = null;
+            selectedDocumentBase64 = null;
+            selectedDocumentMimeType = null;
+            selectedDocumentName = null;
 
             const fileLabel = document.getElementById('selected-file');
             const imageInput = document.getElementById('image-input');
@@ -449,6 +620,49 @@
             toolsOpen = false;
             toolsDropdown.classList.add('hidden');
             toolsBtn.classList.remove('bg-[#333537]');
+        }
+
+        function startNewChat() {
+            localStorage.removeItem('chat_session_id');
+            window.location.reload();
+        }
+
+        function handleSidebarFeature(feature) {
+            if (feature === 'langsmith') {
+                applyToolSelection('langsmith');
+                window.open('https://smith.langchain.com/', '_blank', 'noopener,noreferrer');
+                return;
+            }
+
+            if (feature === 'rag') {
+                applyToolSelection('rag');
+                return;
+            }
+
+            if (feature === 'agents') {
+                if (!toolsOpen) {
+                    toggleTools();
+                }
+                return;
+            }
+
+            if (feature === 'settings') {
+                if (!proOpen) {
+                    togglePro();
+                }
+                return;
+            }
+
+            if (feature === 'help') {
+                const helpText = 'Quick help: use Tools for Web Search/OCR/RAG, click Update location, and press Send after entering your prompt.';
+                const greeting = document.getElementById('greeting');
+                if (greeting) {
+                    greeting.style.display = 'none';
+                }
+                appendAssistantMessage(helpText);
+                const mainContent = document.querySelector('main > div.overflow-y-auto');
+                mainContent.scrollTop = mainContent.scrollHeight;
+            }
         }
 
         function applyProSelection(mode) {
@@ -610,13 +824,16 @@
         // Trigger resize event on load to set initial correct state
         window.dispatchEvent(new Event('resize'));
         applyProSelection(selectedProMode);
+        restoreSavedLocation();
         loadConversationHistory();
 
         // Chat logic
         async function sendMessage() {
             const inputField = document.getElementById('chat-input');
             const message = inputField.value.trim();
-            if (!message && !selectedImageBase64) return;
+            if (!message && !selectedImageBase64 && !selectedDocumentBase64) return;
+
+            userHasInteracted = true;
 
             const chatContainer = document.getElementById('chat-container');
             const greeting = document.getElementById('greeting');
@@ -630,7 +847,9 @@
             const userVisibleMessage = message || 'Analyze this image';
             const userContentToShow = selectedImageName
                 ? `${userVisibleMessage}\n[Image: ${selectedImageName}]`
-                : userVisibleMessage;
+                : selectedDocumentName
+                    ? `${userVisibleMessage}\n[PDF: ${selectedDocumentName}]`
+                    : userVisibleMessage;
             appendUserMessage(userContentToShow);
             
             // Clear input
@@ -657,9 +876,16 @@
                     body: JSON.stringify({
                         message: userVisibleMessage,
                         session_id: chatSessionId,
+                        user_location_primary: detectedLocationPrimary,
+                        user_location_secondary: detectedLocationSecondary,
+                        user_latitude: detectedLatitude ? Number(detectedLatitude) : null,
+                        user_longitude: detectedLongitude ? Number(detectedLongitude) : null,
                         image_base64: selectedImageBase64,
                         image_mime_type: selectedImageMimeType,
-                        image_name: selectedImageName
+                        image_name: selectedImageName,
+                        document_base64: selectedDocumentBase64,
+                        document_mime_type: selectedDocumentMimeType,
+                        document_name: selectedDocumentName
                     })
                 });
 
