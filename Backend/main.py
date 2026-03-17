@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
+from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -354,6 +355,14 @@ def is_weather_request(message: str) -> bool:
     return any(keyword in normalized_message for keyword in ["weather", "forecast", "temperature"])
 
 
+def is_time_request(message: str) -> bool:
+    normalized_message = message.lower()
+    return any(
+        keyword in normalized_message
+        for keyword in ["what time", "current time", "real time", "time now", "local time"]
+    )
+
+
 def is_sehri_request(message: str) -> bool:
     normalized_message = message.lower()
     return any(keyword in normalized_message for keyword in ["sehri", "suhoor", "imsak"])
@@ -610,10 +619,14 @@ def get_weather_response(chat: "ChatMessage") -> Optional[str]:
         )
 
         if has_primary_data:
-            return (
+            answer = (
                 f"Today's weather update for {resolved_location}: {condition}. "
                 f"Temperature {temp_c}°C, feels like {feels_like_c}°C, humidity {humidity}%, "
                 f"wind {wind_kmph} km/h, chance of rain {rain_chance}%."
+            )
+            return append_reference_block(
+                answer,
+                [{"title": "wttr.in weather data", "url": f"https://wttr.in/{quote(location_query)}?format=j1"}],
             )
     except Exception as exc:
         logger.warning("Weather lookup failed from wttr.in: %s", exc)
@@ -658,15 +671,64 @@ def get_weather_response(chat: "ChatMessage") -> Optional[str]:
         resolved_location = chat.user_location_primary or f"{latitude:.4f}, {longitude:.4f}"
         condition = weather_code_to_text(weather_code)
 
-        return (
+        answer = (
             f"Today's weather update for {resolved_location}: {condition}. "
             f"Temperature {temp_c if temp_c is not None else 'N/A'}°C, "
             f"feels like {feels_like_c if feels_like_c is not None else 'N/A'}°C, "
             f"humidity {humidity if humidity is not None else 'N/A'}%, "
             f"wind {wind_kmph if wind_kmph is not None else 'N/A'} km/h, "
             f"chance of rain {rain_probability}%.")
+        return append_reference_block(
+            answer,
+            [{"title": "Open-Meteo weather data", "url": f"https://api.open-meteo.com/v1/forecast?{meteo_query}"}],
+        )
     except Exception as exc:
         logger.warning("Weather lookup failed from Open-Meteo fallback: %s", exc)
+        return None
+
+
+def infer_timezone_and_label(message: str, chat: "ChatMessage") -> tuple[Optional[str], Optional[str], list[dict[str, str]]]:
+    searchable = f"{message} {chat.user_location_primary or ''}".lower()
+
+    if any(keyword in searchable for keyword in [
+        "bangladesh", "dhaka", "chattogram", "chittagong", "khulna", "rajshahi",
+        "sylhet", "barishal", "rangpur", "mymensingh",
+    ]):
+        return (
+            "Asia/Dhaka",
+            "Bangladesh",
+            [
+                {"title": "IANA time zone database", "url": "https://www.iana.org/time-zones"},
+                {"title": "Time and Date - Dhaka, Bangladesh", "url": "https://www.timeanddate.com/worldclock/bangladesh/dhaka"},
+            ],
+        )
+
+    if chat.user_location_primary:
+        return (
+            None,
+            chat.user_location_primary,
+            [],
+        )
+
+    return (None, None, [])
+
+
+def get_current_time_response(chat: "ChatMessage", message: str) -> Optional[str]:
+    timezone_name, label, sources = infer_timezone_and_label(message, chat)
+    if not timezone_name:
+        return None
+
+    try:
+        now = datetime.now(ZoneInfo(timezone_name))
+        offset = now.strftime("%z")
+        readable_offset = f"UTC{offset[:3]}:{offset[3:]}" if offset else timezone_name
+        answer = (
+            f"The current time in {label} is {now.strftime('%I:%M %p')} on {now.strftime('%A, %d %B %Y')} "
+            f"({timezone_name}, {readable_offset})."
+        )
+        return append_reference_block(answer, sources)
+    except Exception as exc:
+        logger.warning("Time lookup failed for timezone %s: %s", timezone_name, exc)
         return None
 
 
@@ -977,6 +1039,13 @@ def format_reference_links(sources: list[dict[str, str]]) -> str:
         url = item.get("url", "")
         lines.append(f"{index}. [{title}]({url})")
     return "\n".join(lines)
+
+
+def append_reference_block(answer: str, sources: list[dict[str, str]]) -> str:
+    references = format_reference_links(sources)
+    if not references:
+        return answer
+    return f"{answer}\n\n{references}"
 
 
 @traceable(name="full_web_search_chain", run_type="chain")
@@ -1333,6 +1402,12 @@ async def chat_endpoint(chat: ChatMessage):
         if location_response:
             save_chat_message(session_id, "assistant", location_response)
             return {"response": location_response, "session_id": session_id}
+
+        if is_time_request(enriched_message):
+            time_response = get_current_time_response(chat, enriched_message)
+            if time_response:
+                save_chat_message(session_id, "assistant", time_response)
+                return {"response": time_response, "session_id": session_id}
 
         if is_sehri_request(enriched_message):
             sehri_response = get_sehri_response(chat)
