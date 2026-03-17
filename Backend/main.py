@@ -36,6 +36,27 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
 CHAT_DB_PATH = BASE_DIR / "Database" / "chat_history.db"
 
+# ---------------------------------------------------------------------------
+# Domain allow/block lists for web search quality control
+# ---------------------------------------------------------------------------
+NEWS_DOMAINS = [
+    "thedailystar.net", "bdnews24.com", "dhakatribune.com", "newagebd.net",
+    "tbsnews.net", "thefinancialexpress.com.bd", "prothomalo.com",
+    "aljazeera.com", "bbc.com", "reuters.com", "apnews.com",
+    "theguardian.com", "cnn.com", "nytimes.com", "washingtonpost.com",
+    "theindependent.com", "ndtv.com", "thehindu.com", "parliament.gov.bd",
+    "wikipedia.org", "britannica.com",
+]
+
+BLOCKED_DOMAINS = [
+    "netflix.com", "youtube.com", "amazon.com", "primevideo.com",
+    "apple.com", "hulu.com", "disneyplus.com", "imdb.com",
+    "rottentomatoes.com", "people.com", "tvguide.com", "tv.com",
+    "spotify.com", "tiktok.com", "instagram.com", "facebook.com",
+    "twitter.com", "x.com", "reddit.com", "quora.com",
+    "pinterest.com", "tumblr.com", "mypikpak.com",
+]
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -175,6 +196,9 @@ def should_use_search(message: str) -> bool:
         for keyword in [
             "search", "web", "internet", "latest", "news", "find", "look up", "google",
             "weather", "forecast", "temperature", "sehri", "suhoor", "iftar", "prayer time", "near me",
+            "what happened", "happened in", "happened on", "recent", "today in", "update on",
+            "event", "protest", "election", "government", "politics", "crisis", "disaster",
+            "current", "right now", "this week", "this month",
         ]
     )
 
@@ -217,6 +241,32 @@ def build_search_queries(message: str) -> list[str]:
     location_hint = extract_location_hint(cleaned_query)
 
     queries = [cleaned_query]
+
+    if "what happened" in lowered_query or "happened on" in lowered_query or "happened in" in lowered_query:
+        queries.extend(
+            [
+                f"{cleaned_query} news",
+                f"{cleaned_query} latest news",
+                f"{cleaned_query} Reuters BBC Al Jazeera",
+            ]
+        )
+
+    if "bangladesh" in lowered_query:
+        queries.extend(
+            [
+                f"{cleaned_query} site:thedailystar.net OR site:bdnews24.com OR site:dhakatribune.com",
+                f"{cleaned_query} Bangladesh news",
+            ]
+        )
+
+    if "bangladesh" in lowered_query and ("july 24" in lowered_query or "24 july" in lowered_query):
+        queries.extend(
+            [
+                "July 24 Bangladesh protests news",
+                "July 24 Bangladesh student protest news",
+                "24 July Bangladesh The Daily Star bdnews24 Dhaka Tribune",
+            ]
+        )
 
     if location_hint:
         if any(keyword in lowered_query for keyword in ["weather", "forecast", "temperature"]):
@@ -705,6 +755,87 @@ def get_local_fallback_response(message: str) -> str:
     )
 
 
+# ---------------------------------------------------------------------------
+# Web-scraping helpers for rich search results
+# ---------------------------------------------------------------------------
+
+def is_blocked(url: str) -> bool:
+    """Return True if the URL belongs to a blocked entertainment/social domain."""
+    url_lower = url.lower()
+    return any(domain in url_lower for domain in BLOCKED_DOMAINS)
+
+
+def is_news(url: str) -> bool:
+    """Return True if the URL belongs to a known news/reference domain."""
+    url_lower = url.lower()
+    return any(domain in url_lower for domain in NEWS_DOMAINS)
+
+
+def scrape_page_content(url: str, max_chars: int = 2000) -> str:
+    """Fetch and extract clean body text from a URL using httpx + BeautifulSoup."""
+    try:
+        import httpx
+        from bs4 import BeautifulSoup
+
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/124.0 Safari/537.36"
+            ),
+            "Accept-Language": "en-US,en;q=0.9",
+        }
+        resp = httpx.get(url, headers=headers, timeout=8, follow_redirects=True)
+        if resp.status_code != 200:
+            return ""
+        soup = BeautifulSoup(resp.text, "html.parser")
+        # Remove boilerplate tags
+        for tag in soup(["script", "style", "nav", "header", "footer",
+                         "aside", "form", "noscript", "iframe"]):
+            tag.decompose()
+        # Prefer <article> or <main>, fall back to <body>
+        container = soup.find("article") or soup.find("main") or soup.body
+        text = " ".join((container or soup).get_text(separator=" ").split())
+        return text[:max_chars]
+    except Exception as exc:
+        logger.debug("scrape_page_content failed for %s: %s", url, exc)
+        return ""
+
+
+def is_news_query(query: str) -> bool:
+    lowered = query.lower()
+    return any(
+        key in lowered
+        for key in [
+            "news", "latest", "what happened", "happened on", "happened in",
+            "recent", "update", "protest", "election", "government", "politics",
+            "crisis", "war", "flood", "earthquake", "accident",
+        ]
+    )
+
+
+def search_news_with_sources(query: str, max_results: int = 5) -> list[dict[str, str]]:
+    results: list[dict[str, str]] = []
+    try:
+        from ddgs import DDGS
+
+        for item in DDGS().news(query, max_results=max_results * 2):
+            url = (item.get("url") or item.get("href") or "").strip()
+            if not url or is_blocked(url):
+                continue
+            title = (item.get("title") or "Untitled").strip()
+            body = (item.get("body") or "").strip()
+            source = (item.get("source") or "").strip()
+            if source and source.lower() not in title.lower():
+                title = f"{title} ({source})"
+            results.append({"title": title, "href": url, "body": body})
+            if len(results) >= max_results:
+                break
+    except Exception as exc:
+        logger.warning("DDGS news search failed for '%s': %s", query, exc)
+    return results
+
+
 @traceable(name="internet_search_tool", run_type="tool")
 def web_search(query: str) -> str:
     try:
@@ -722,6 +853,9 @@ def search_web_with_sources(query: str, max_results: int = 5) -> tuple[str, list
         results = []
 
         search_queries = build_search_queries(query)
+        if is_news_query(cleaned_query):
+            for query_variant in search_queries[:8]:
+                results.extend(search_news_with_sources(query_variant, max_results=max_results))
         lowered_query = cleaned_query.lower()
         if "bangladesh" in lowered_query and "parliament" in lowered_query and ("member" in lowered_query or "name" in lowered_query):
             search_queries.extend([
@@ -782,13 +916,34 @@ def search_web_with_sources(query: str, max_results: int = 5) -> tuple[str, list
 
             if url in seen_urls:
                 continue
+            # Skip entertainment/social media domains
+            if is_blocked(url):
+                continue
             seen_urls.add(url)
 
             searchable_text = f"{title} {snippet} {url}".lower()
+            if "bangladesh" in cleaned_query.lower() and "bangladesh" not in searchable_text:
+                if not any(domain in url.lower() for domain in ["thedailystar.net", "bdnews24.com", "dhakatribune.com", "newagebd.net", "tbsnews.net", "thefinancialexpress.com.bd", "prothomalo.com", "parliament.gov.bd"]):
+                    continue
+            if any(key in cleaned_query.lower() for key in ["what happened", "happened on", "happened in"]):
+                if not (is_news(url) or any(word in searchable_text for word in ["news", "protest", "government", "student", "bangladesh", "police", "court", "election"])):
+                    continue
+            if "bangladesh" in cleaned_query.lower() and any(key in cleaned_query.lower() for key in ["july 24", "24 july"]):
+                if not any(word in searchable_text for word in ["july 24", "24 july", "protest", "student", "curfew", "hasina", "unrest", "violations", "revolution"]):
+                    continue
             overlap = sum(1 for token in query_tokens if token in searchable_text)
             domain_bonus = 1 if any(domain in url.lower() for domain in ["wikipedia.org", ".gov", "parliament.gov.bd"]) else 0
             list_bonus = 1 if any(key in searchable_text for key in ["list of members", "member list", "jatiya sangsad"]) else 0
-            score = overlap + domain_bonus + list_bonus
+            news_bonus = 2 if is_news(url) else 0
+            country_bonus = 2 if "bangladesh" in cleaned_query.lower() and "bangladesh" in searchable_text else 0
+            date_bonus = 2 if any(key in cleaned_query.lower() for key in ["july 24", "24 july"]) and any(key in searchable_text for key in ["july 24", "24 july"]) else 0
+            penalty = 0
+            if any(bad in searchable_text for bad in ["grammar", "tense", "english", "idiom", "tutor", "learn english"]):
+                penalty += 4
+            if not any(word in cleaned_query.lower() for word in ["sport", "cricket", "football", "match", "game"]):
+                if any(bad in searchable_text for bad in ["cricket", "asia cup", "vs sri lanka", "match preview", "sports"]):
+                    penalty += 4
+            score = overlap + domain_bonus + list_bonus + news_bonus + country_bonus + date_bonus - penalty
             ranked_items.append((score, title, url, snippet))
 
         ranked_items.sort(key=lambda row: row[0], reverse=True)
@@ -816,12 +971,70 @@ def format_reference_links(sources: list[dict[str, str]]) -> str:
     if not sources:
         return ""
 
-    lines = ["References:"]
+    lines = ["**References:**"]
     for index, item in enumerate(sources, start=1):
         title = item.get("title", "Source")
         url = item.get("url", "")
-        lines.append(f"{index}. {title} - {url}")
+        lines.append(f"{index}. [{title}]({url})")
     return "\n".join(lines)
+
+
+@traceable(name="full_web_search_chain", run_type="chain")
+def run_full_web_search_chain(message: str, location_context: str = "") -> str:
+    """
+    Full pipeline:
+      1. Search for relevant URLs (filtered, ranked)
+      2. Scrape body text from top pages
+      3. Ask Groq to summarise based on scraped content
+      4. Always append numbered markdown reference links
+    """
+    web_context, web_sources = search_web_with_sources(message)
+
+    # Scrape body text for the top sources
+    scraped_parts: list[str] = []
+    for idx, source in enumerate(web_sources[:5], start=1):
+        url = source.get("url", "")
+        if not url:
+            continue
+        page_text = scrape_page_content(url, max_chars=2000)
+        title = source.get("title", "Source")
+        if page_text:
+            scraped_parts.append(f"[{idx}] {title}\nURL: {url}\n{page_text}")
+        elif web_context:
+            # Fall back to snippet already in web_context
+            pass
+
+    scraped_context = "\n\n".join(scraped_parts) if scraped_parts else web_context
+
+    if not scraped_context and not web_sources:
+        return "I could not fetch reliable web results right now. Please try again in a moment."
+
+    date_str = datetime.now().strftime("%d %B %Y")
+    location_hint = f"\nUser location: {location_context}" if location_context else ""
+    prompt = (
+        f"Today is {date_str}.{location_hint}\n"
+        "You are a knowledgeable assistant that always cites sources.\n"
+        "Below is content scraped from real news portals and web pages.\n"
+        "Read it carefully and answer the user's question accurately and specifically.\n"
+        "If the content mentions specific events, names, dates, or figures — include them.\n"
+        "Do NOT mention TV shows, movies, or entertainment unless the user explicitly asked about them.\n\n"
+        f"=== Scraped Web Content ===\n{scraped_context}\n\n"
+        f"User question: {message}\n\n"
+        "Write a clear, detailed answer based on the above content. "
+        "Do not hallucinate — if information is not in the content, say so."
+    )
+
+    try:
+        resp = get_groq_llm().invoke([HumanMessage(content=prompt)])
+        answer = normalize_response_content(resp.content)
+    except Exception as exc:
+        logger.warning("LLM call failed in run_full_web_search_chain: %s", exc)
+        answer = scraped_context[:1500] if scraped_context else "Web search returned no useful content."
+
+    references = format_reference_links(web_sources)
+    if references:
+        answer = f"{answer}\n\n{references}"
+    return answer
 
 
 def get_groq_llm():
@@ -945,32 +1158,22 @@ def local_ocr_extract_text(image_bytes: bytes) -> str:
 
 @traceable(name="text_chat_chain", run_type="chain")
 def do_text_chat(message: str, session_id: str) -> str:
-    """Text-only path: Groq + RAG + optional web search."""
+    """Text-only path: Groq + RAG + optional web search (with page scraping + references)."""
     use_search = should_use_search(message)
-    rag_context = "" if use_search else (get_rag_response(message) or get_text_fallback_response())
-    web_context = ""
-    web_sources: list[dict[str, str]] = []
     if use_search:
-        web_context, web_sources = search_web_with_sources(message)
-        if not web_sources and not web_context:
-            return (
-                "I could not fetch reliable web results right now. Please try again in a moment."
-            )
+        return run_full_web_search_chain(message)
 
+    rag_context = get_rag_response(message) or get_text_fallback_response()
     history = get_recent_chat_history(session_id, limit=12)
     prompt = build_context_prompt(
         message,
         rag_context=rag_context,
-        web_context=web_context,
+        web_context="",
         has_image=False,
         conversation_history=format_chat_history(history),
     )
     resp = get_groq_llm().invoke([HumanMessage(content=prompt)])
-    answer = normalize_response_content(resp.content)
-    references = format_reference_links(web_sources)
-    if references:
-        answer = f"{answer}\n\n{references}"
-    return answer
+    return normalize_response_content(resp.content)
 
 
 @traceable(name="image_chat_chain", run_type="chain")
@@ -1093,31 +1296,21 @@ def get_location_response(chat: ChatMessage) -> Optional[str]:
 @traceable(name="text_chat_with_context_chain", run_type="chain")
 def do_text_chat_with_context(message: str, session_id: str, location_context: str = "") -> str:
     use_search = should_use_search(message)
-    rag_context = "" if use_search else (get_rag_response(message) or get_text_fallback_response())
-    web_context = ""
-    web_sources: list[dict[str, str]] = []
     if use_search:
-        web_context, web_sources = search_web_with_sources(message)
-        if not web_sources and not web_context:
-            return (
-                "I could not fetch reliable web results right now. Please try again in a moment."
-            )
+        return run_full_web_search_chain(message, location_context=location_context)
 
+    rag_context = get_rag_response(message) or get_text_fallback_response()
     history = get_recent_chat_history(session_id, limit=12)
     prompt = build_context_prompt(
         message,
         rag_context=rag_context,
-        web_context=web_context,
+        web_context="",
         has_image=False,
         conversation_history=format_chat_history(history),
         location_context=location_context,
     )
     resp = get_groq_llm().invoke([HumanMessage(content=prompt)])
-    answer = normalize_response_content(resp.content)
-    references = format_reference_links(web_sources)
-    if references:
-        answer = f"{answer}\n\n{references}"
-    return answer
+    return normalize_response_content(resp.content)
 
 
 @app.post("/chat")
