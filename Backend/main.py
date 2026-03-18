@@ -49,13 +49,34 @@ NEWS_DOMAINS = [
     "wikipedia.org", "britannica.com",
 ]
 
+TRAVEL_DOMAINS = [
+    "wikipedia.org",
+    "wikivoyage.org",
+    "lonelyplanet.com",
+    "tripadvisor.com",
+    "booking.com",
+    "google.com/maps",
+    "maps.google.com",
+    "rome2rio.com",
+]
+
+EDUCATION_TRUSTED_DOMAINS = [
+    "iiuc.ac.bd",
+    "web.iiuc.ac.bd",
+    "portal.iiuc.ac.bd",
+    "admissions.com.bd",
+    "ugc.gov.bd",
+    ".edu",
+    ".ac.",
+]
+
 BLOCKED_DOMAINS = [
     "netflix.com", "youtube.com", "amazon.com", "primevideo.com",
     "apple.com", "hulu.com", "disneyplus.com", "imdb.com",
     "rottentomatoes.com", "people.com", "tvguide.com", "tv.com",
     "spotify.com", "tiktok.com", "instagram.com", "facebook.com",
     "twitter.com", "x.com", "reddit.com", "quora.com",
-    "pinterest.com", "tumblr.com", "mypikpak.com",
+    "pinterest.com", "tumblr.com", "mypikpak.com", "zhihu.com",
 ]
 
 logging.basicConfig(level=logging.INFO)
@@ -200,6 +221,7 @@ def should_use_search(message: str) -> bool:
             "what happened", "happened in", "happened on", "recent", "today in", "update on",
             "event", "protest", "election", "government", "politics", "crisis", "disaster",
             "current", "right now", "this week", "this month",
+            "tuition", "fees", "fee structure", "admission", "university", "ranking", "scholarship",
         ]
     )
 
@@ -215,6 +237,60 @@ def extract_search_query(message: str) -> str:
     for prefix in prefixes:
         if lowered.startswith(prefix):
             return normalized[len(prefix):].strip() or normalized
+    return normalized
+
+
+def is_travel_query(query: str) -> bool:
+    lowered = query.lower()
+    travel_keywords = [
+        "visit", "visiting", "tour", "tourist", "attraction", "attractions",
+        "places to go", "places to visit", "destination", "destinations",
+        "travel", "trip", "itinerary", "map", "maps", "google map",
+        "top place", "top places", "top area", "top areas",
+    ]
+    return any(keyword in lowered for keyword in travel_keywords)
+
+
+def is_education_query(query: str) -> bool:
+    lowered = query.lower()
+    education_keywords = [
+        "tuition", "fee", "fees", "admission", "university", "college", "campus",
+        "program", "department", "credit", "semester", "scholarship", "waiver",
+        "course", "curriculum", "ranking", "tuition fee", "fee structure",
+    ]
+    return any(keyword in lowered for keyword in education_keywords)
+
+
+def is_iiuc_query(query: str) -> bool:
+    lowered = query.lower()
+    return (
+        "iiuc" in lowered
+        or "international islamic university chittagong" in lowered
+        or "international islamic university, chittagong" in lowered
+    )
+
+
+def get_query_focus_tokens(cleaned_query: str) -> set[str]:
+    tokens = {token for token in re.findall(r"[a-z0-9]+", cleaned_query.lower()) if len(token) > 2}
+    stop = {
+        "search", "web", "internet", "latest", "today", "this", "that", "with", "from",
+        "about", "what", "where", "when", "which", "their", "they", "into", "also",
+        "tuition", "fees", "fee", "admission", "university", "college",
+    }
+    return {token for token in tokens if token not in stop}
+
+
+def normalize_search_query(query: str) -> str:
+    normalized = re.sub(r"\s+", " ", query.strip())
+    lowered = normalized.lower()
+
+    # Fix common typo seen in prompts like "thair map"
+    normalized = re.sub(r"\bthair\b", "their", normalized, flags=re.IGNORECASE)
+
+    # If query is tourism/travel intent and uses "BD", expand to Bangladesh.
+    if is_travel_query(normalized) and re.search(r"\bbd\b", lowered):
+        normalized = re.sub(r"\bbd\b", "Bangladesh", normalized, flags=re.IGNORECASE)
+
     return normalized
 
 
@@ -237,7 +313,7 @@ def extract_location_hint(message: str) -> str:
 
 
 def build_search_queries(message: str) -> list[str]:
-    cleaned_query = extract_search_query(message)
+    cleaned_query = normalize_search_query(extract_search_query(message))
     lowered_query = cleaned_query.lower()
     location_hint = extract_location_hint(cleaned_query)
 
@@ -268,6 +344,40 @@ def build_search_queries(message: str) -> list[str]:
                 "24 July Bangladesh The Daily Star bdnews24 Dhaka Tribune",
             ]
         )
+
+    if is_travel_query(cleaned_query):
+        queries.extend(
+            [
+                f"{cleaned_query} best tourist attractions",
+                f"{cleaned_query} with Google Maps links",
+            ]
+        )
+
+        if "bangladesh" in lowered_query:
+            queries.extend(
+                [
+                    "top tourist attractions in Bangladesh with map links",
+                    "best places to visit in Bangladesh Google Maps",
+                    "Cox's Bazar Sundarbans Srimangal Saint Martin map links",
+                ]
+            )
+
+    if is_education_query(cleaned_query):
+        queries.extend(
+            [
+                f"{cleaned_query} official",
+                f"{cleaned_query} fee structure",
+                f"{cleaned_query} admission tuition cost",
+            ]
+        )
+        if is_iiuc_query(lowered_query):
+            queries.extend(
+                [
+                    "site:iiuc.ac.bd tuition fees",
+                    "site:web.iiuc.ac.bd payment of tuition fees",
+                    "site:iiuc.ac.bd fee structure international islamic university chittagong",
+                ]
+            )
 
     if location_hint:
         if any(keyword in lowered_query for keyword in ["weather", "forecast", "temperature"]):
@@ -898,6 +1008,50 @@ def search_news_with_sources(query: str, max_results: int = 5) -> list[dict[str,
     return results
 
 
+def get_bangladesh_tourism_fallback(max_results: int = 5) -> tuple[str, list[dict[str, str]]]:
+    places = [
+        ("Cox's Bazar Sea Beach", "Cox's Bazar Sea Beach Bangladesh"),
+        ("Sundarbans", "Sundarbans Bangladesh"),
+        ("Saint Martin's Island", "Saint Martin's Island Bangladesh"),
+        ("Sajek Valley", "Sajek Valley Bangladesh"),
+        ("Lalbagh Fort", "Lalbagh Fort Dhaka Bangladesh"),
+    ][:max_results]
+
+    sources: list[dict[str, str]] = []
+    context_parts: list[str] = []
+    for index, (title, map_query) in enumerate(places, start=1):
+        map_url = f"https://www.google.com/maps/search/?api=1&query={quote(map_query)}"
+        sources.append({"title": f"{title} (Google Maps)", "url": map_url})
+        context_parts.append(
+            f"[{index}] {title}\nURL: {map_url}\n"
+            "Snippet: Popular tourist destination in Bangladesh with direct map link."
+        )
+
+    return "\n\n".join(context_parts), sources
+
+
+def get_iiuc_tuition_fallback(max_results: int = 6) -> tuple[str, list[dict[str, str]]]:
+    official_sources = [
+        ("IIUC Official Website", "https://iiuc.ac.bd"),
+        ("IIUC - Online Application", "https://web.iiuc.ac.bd"),
+        ("IIUC - Fee Structure", "https://iiuc.ac.bd/fee-structure"),
+        ("IIUC - Payment of Tuition Fees", "https://web.iiuc.ac.bd"),
+        ("IIUC - Financial Aid", "https://portal.iiuc.ac.bd"),
+        ("GST Admissions (Bangladesh)", "https://gst.admissions.com.bd"),
+    ][:max_results]
+
+    sources: list[dict[str, str]] = []
+    context_parts: list[str] = []
+    for index, (title, url) in enumerate(official_sources, start=1):
+        sources.append({"title": title, "url": url})
+        context_parts.append(
+            f"[{index}] {title}\nURL: {url}\n"
+            "Snippet: Official or institutional source for IIUC tuition/admission details."
+        )
+
+    return "\n\n".join(context_parts), sources
+
+
 @traceable(name="internet_search_tool", run_type="tool")
 def web_search(query: str) -> str:
     try:
@@ -910,7 +1064,7 @@ def web_search(query: str) -> str:
 
 @traceable(name="search_with_references", run_type="tool")
 def search_web_with_sources(query: str, max_results: int = 5) -> tuple[str, list[dict[str, str]]]:
-    cleaned_query = extract_search_query(query)
+    cleaned_query = normalize_search_query(extract_search_query(query))
     try:
         results = []
 
@@ -969,6 +1123,25 @@ def search_web_with_sources(query: str, max_results: int = 5) -> tuple[str, list
         query_tokens = {token for token in re.findall(r"[a-z0-9]+", cleaned_query.lower()) if len(token) > 2}
 
         ranked_items = []
+        travel_intent = is_travel_query(cleaned_query)
+        education_intent = is_education_query(cleaned_query)
+        focus_tokens = get_query_focus_tokens(cleaned_query)
+        travel_tokens = {
+            "tour", "tourist", "attraction", "visit", "destination", "travel", "trip",
+            "map", "maps", "google maps", "guide", "things to do", "place", "places",
+        }
+        business_bd_tokens = {
+            "business development", "bd role", "sales", "amazon deal", "blu-ray", "gpu",
+            "graphics card", "english grammar", "hd vs bd", "marketing",
+        }
+        education_tokens = {
+            "tuition", "fee", "fees", "admission", "university", "college", "department",
+            "credit", "semester", "program", "scholarship", "waiver", "campus", "course",
+        }
+        education_bad_tokens = {
+            "ropeway", "temple", "pilgrimage", "gaming", "forum", "warcraft", "candy mountain",
+            "community guidelines", "tiktok", "movie", "netflix",
+        }
         for item in results:
             title = (item.get("title") or "Untitled").strip()
             url = (item.get("href") or item.get("url") or "").strip()
@@ -985,11 +1158,31 @@ def search_web_with_sources(query: str, max_results: int = 5) -> tuple[str, list
 
             searchable_text = f"{title} {snippet} {url}".lower()
             if "bangladesh" in cleaned_query.lower() and "bangladesh" not in searchable_text:
-                if not any(domain in url.lower() for domain in ["thedailystar.net", "bdnews24.com", "dhakatribune.com", "newagebd.net", "tbsnews.net", "thefinancialexpress.com.bd", "prothomalo.com", "parliament.gov.bd"]):
+                if not any(domain in url.lower() for domain in ["thedailystar.net", "bdnews24.com", "dhakatribune.com", "newagebd.net", "tbsnews.net", "thefinancialexpress.com.bd", "prothomalo.com", "parliament.gov.bd", *TRAVEL_DOMAINS]):
                     continue
             if any(key in cleaned_query.lower() for key in ["what happened", "happened on", "happened in"]):
                 if not (is_news(url) or any(word in searchable_text for word in ["news", "protest", "government", "student", "bangladesh", "police", "court", "election"])):
                     continue
+
+            if travel_intent:
+                if not any(token in searchable_text for token in travel_tokens) and not any(domain in url.lower() for domain in TRAVEL_DOMAINS):
+                    continue
+
+                # For travel prompts, reject ambiguous "BD" business-development style pages.
+                if any(token in searchable_text for token in business_bd_tokens):
+                    continue
+
+            if education_intent:
+                if not any(token in searchable_text for token in education_tokens):
+                    continue
+
+                if any(token in searchable_text for token in education_bad_tokens):
+                    continue
+
+                # Keep search anchored to the user's entity (e.g., iiuc) when present.
+                if focus_tokens and not any(token in searchable_text for token in focus_tokens):
+                    continue
+
             if "bangladesh" in cleaned_query.lower() and any(key in cleaned_query.lower() for key in ["july 24", "24 july"]):
                 if not any(word in searchable_text for word in ["july 24", "24 july", "protest", "student", "curfew", "hasina", "unrest", "violations", "revolution"]):
                     continue
@@ -999,23 +1192,103 @@ def search_web_with_sources(query: str, max_results: int = 5) -> tuple[str, list
             news_bonus = 2 if is_news(url) else 0
             country_bonus = 2 if "bangladesh" in cleaned_query.lower() and "bangladesh" in searchable_text else 0
             date_bonus = 2 if any(key in cleaned_query.lower() for key in ["july 24", "24 july"]) and any(key in searchable_text for key in ["july 24", "24 july"]) else 0
+            travel_domain_bonus = 2 if travel_intent and any(domain in url.lower() for domain in TRAVEL_DOMAINS) else 0
+            map_bonus = 2 if travel_intent and any(key in searchable_text for key in ["google map", "google maps", "map link", "coordinates", "location"]) else 0
+            tourism_bonus = 2 if travel_intent and any(key in searchable_text for key in ["tourist", "attraction", "places to visit", "things to do", "travel guide", "destination"]) else 0
+            education_domain_bonus = 2 if education_intent and any(domain in url.lower() for domain in EDUCATION_TRUSTED_DOMAINS) else 0
+            education_term_bonus = 2 if education_intent and any(key in searchable_text for key in ["tuition", "fee structure", "admission fee", "semester fee", "credit fee", "financial aid"]) else 0
+            focus_bonus = 3 if education_intent and focus_tokens and any(token in searchable_text for token in focus_tokens) else 0
             penalty = 0
             if any(bad in searchable_text for bad in ["grammar", "tense", "english", "idiom", "tutor", "learn english"]):
                 penalty += 4
             if not any(word in cleaned_query.lower() for word in ["sport", "cricket", "football", "match", "game"]):
                 if any(bad in searchable_text for bad in ["cricket", "asia cup", "vs sri lanka", "match preview", "sports"]):
                     penalty += 4
-            score = overlap + domain_bonus + list_bonus + news_bonus + country_bonus + date_bonus - penalty
+            if education_intent and any(bad in searchable_text for bad in education_bad_tokens):
+                penalty += 6
+            score = (
+                overlap + domain_bonus + list_bonus + news_bonus + country_bonus + date_bonus
+                + travel_domain_bonus + map_bonus + tourism_bonus
+                + education_domain_bonus + education_term_bonus + focus_bonus - penalty
+            )
             ranked_items.append((score, title, url, snippet))
+
+        # If strict travel filtering removed all candidates, retry with a relaxed travel ranking.
+        if not ranked_items and travel_intent:
+            relaxed_seen = set()
+            for item in results:
+                title = (item.get("title") or "Untitled").strip()
+                url = (item.get("href") or item.get("url") or "").strip()
+                snippet = (item.get("body") or "").strip()
+                if not url or url in relaxed_seen or is_blocked(url):
+                    continue
+                relaxed_seen.add(url)
+
+                searchable_text = f"{title} {snippet} {url}".lower()
+                overlap = sum(1 for token in query_tokens if token in searchable_text)
+                country_bonus = 2 if "bangladesh" in cleaned_query.lower() and "bangladesh" in searchable_text else 0
+                travel_domain_bonus = 2 if any(domain in url.lower() for domain in TRAVEL_DOMAINS) else 0
+                map_bonus = 2 if any(key in searchable_text for key in ["google map", "google maps", "map link", "coordinates", "location"]) else 0
+                tourism_bonus = 2 if any(key in searchable_text for key in ["tourist", "attraction", "places to visit", "things to do", "travel guide", "destination"]) else 0
+                penalty = 4 if any(token in searchable_text for token in business_bd_tokens) else 0
+                score = overlap + country_bonus + travel_domain_bonus + map_bonus + tourism_bonus - penalty
+                ranked_items.append((score, title, url, snippet))
 
         ranked_items.sort(key=lambda row: row[0], reverse=True)
 
-        if ranked_items and ranked_items[0][0] == 0:
+        if education_intent:
+            chosen = [row for row in ranked_items if row[0] > 2]
+            if not chosen:
+                chosen = [row for row in ranked_items if row[0] > 0]
+
+            if is_iiuc_query(cleaned_query):
+                chosen = [
+                    row for row in chosen
+                    if (
+                        "iiuc" in f"{row[1]} {row[2]} {row[3]}".lower()
+                        or "iiuc.ac.bd" in row[2].lower()
+                        or "web.iiuc.ac.bd" in row[2].lower()
+                        or "portal.iiuc.ac.bd" in row[2].lower()
+                    )
+                ]
+            chosen = chosen[:max_results]
+        elif travel_intent:
+            chosen = [row for row in ranked_items if row[0] > 1]
+            if "bangladesh" in cleaned_query.lower():
+                chosen = [
+                    row
+                    for row in chosen
+                    if (
+                        "bangladesh" in f"{row[1]} {row[2]} {row[3]}".lower()
+                        or ".bd" in row[2].lower()
+                        or any(domain in row[2].lower() for domain in TRAVEL_DOMAINS)
+                    )
+                ]
+            chosen = chosen[:max_results]
+            if not chosen:
+                chosen = [row for row in ranked_items if row[0] > 0]
+                if "bangladesh" in cleaned_query.lower():
+                    chosen = [
+                        row
+                        for row in chosen
+                        if (
+                            "bangladesh" in f"{row[1]} {row[2]} {row[3]}".lower()
+                            or ".bd" in row[2].lower()
+                            or any(domain in row[2].lower() for domain in TRAVEL_DOMAINS)
+                        )
+                    ]
+                chosen = chosen[:max_results]
+        elif ranked_items and ranked_items[0][0] == 0:
             chosen = ranked_items[:max_results]
         else:
             chosen = [row for row in ranked_items if row[0] > 0][:max_results]
             if not chosen:
                 chosen = ranked_items[:max_results]
+
+        if travel_intent and "bangladesh" in cleaned_query.lower() and not chosen:
+            return get_bangladesh_tourism_fallback(max_results=max_results)
+        if education_intent and is_iiuc_query(cleaned_query) and not chosen:
+            return get_iiuc_tuition_fallback(max_results=max_results)
 
         for index, (_score, title, url, snippet) in enumerate(chosen, start=1):
 
@@ -1089,8 +1362,12 @@ def run_full_web_search_chain(message: str, location_context: str = "") -> str:
         "Do NOT mention TV shows, movies, or entertainment unless the user explicitly asked about them.\n\n"
         f"=== Scraped Web Content ===\n{scraped_context}\n\n"
         f"User question: {message}\n\n"
-        "Write a clear, detailed answer based on the above content. "
-        "Do not hallucinate — if information is not in the content, say so."
+        "Write a clear, organized answer in this format:\n"
+        "Quick Answer\n"
+        "Key Findings (bullets)\n"
+        "Important Numbers/Details\n"
+        "Gaps/Uncertainty\n"
+        "Use only provided content. Do not hallucinate."
     )
 
     try:
@@ -1098,7 +1375,26 @@ def run_full_web_search_chain(message: str, location_context: str = "") -> str:
         answer = normalize_response_content(resp.content)
     except Exception as exc:
         logger.warning("LLM call failed in run_full_web_search_chain: %s", exc)
-        answer = scraped_context[:1500] if scraped_context else "Web search returned no useful content."
+        if web_sources:
+            findings = []
+            for source in web_sources[:5]:
+                title = source.get("title", "Source")
+                url = source.get("url", "")
+                findings.append(f"- {title} ({url})")
+
+            answer = (
+                "Quick Answer:\n"
+                "Relevant web sources were found, but advanced summarization is unavailable right now.\n\n"
+                "Key Findings:\n"
+                + "\n".join(findings)
+                + "\n\n"
+                "Important Numbers/Details:\n"
+                "Open the referenced official pages for exact latest values.\n\n"
+                "Gaps/Uncertainty:\n"
+                "Some web pages can change frequently; verify directly from official institutional sources."
+            )
+        else:
+            answer = "Web search returned no useful content."
 
     references = format_reference_links(web_sources)
     if references:

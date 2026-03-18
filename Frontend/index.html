@@ -332,12 +332,27 @@
 
         function formatAssistantContent(text) {
             const escaped = escapeHtml(String(text || ''));
-            const withLinks = escaped.replace(/(https?:\/\/[^\s<]+)/g, (url) => {
-                const clean = url.replace(/[),.;]+$/g, '');
-                const trailing = url.slice(clean.length);
-                return `<a href="${clean}" target="_blank" rel="noopener noreferrer" class="text-blue-400 underline break-all">${clean}</a>${trailing}`;
+
+            // Support markdown emphasis used by backend blocks (e.g., References:)
+            let formatted = escaped.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+
+            // Support markdown links emitted by backend: [Title](https://example.com)
+            formatted = formatted.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, (_match, label, rawUrl) => {
+                const clean = String(rawUrl).replace(/[),.;]+$/g, '');
+                const trailing = String(rawUrl).slice(clean.length);
+                const href = clean.replace(/&amp;/g, '&');
+                return `<a href="${href}" target="_blank" rel="noopener noreferrer" class="text-blue-400 underline break-all">${label}</a>${trailing}`;
             });
-            return withLinks.replace(/\n/g, '<br>');
+
+            // Also linkify plain URLs that are not wrapped in markdown
+            formatted = formatted.replace(/(^|[\s>(])(https?:\/\/[^\s<]+)/g, (_match, prefix, rawUrl) => {
+                const clean = String(rawUrl).replace(/[),.;]+$/g, '');
+                const trailing = String(rawUrl).slice(clean.length);
+                const href = clean.replace(/&amp;/g, '&');
+                return `${prefix}<a href="${href}" target="_blank" rel="noopener noreferrer" class="text-blue-400 underline break-all">${clean}</a>${trailing}`;
+            });
+
+            return formatted.replace(/\n/g, '<br>');
         }
 
         function appendUserMessage(content) {
